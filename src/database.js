@@ -16,7 +16,7 @@ const DEFAULT_DRIVERS = [
         usia: '28',
         reaksi: '303',
         fileCookie: 'cookie_agung.json',
-        fileSS: 'Screenshot_init_1001.jpg',
+        fileSS: 'ss_agung.jpg',
         noWa: '6285641858425@c.us',
     },
     {
@@ -25,7 +25,7 @@ const DEFAULT_DRIVERS = [
         usia: '31',
         reaksi: '268',
         fileCookie: 'cookie_randi.json',
-        fileSS: 'Screenshot_init_1002.jpg',
+        fileSS: 'ss_randi.jpg',
         noWa: '6285641858425@c.us',
     },
     {
