@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════
-//  🚀 AJIPUTRA BOT AUTOMATION ENGINE v4.1
+//  🚀 AJIPUTRA BOT AUTOMATION ENGINE v1.0
 //  🧠 Sovereign Telemetry Stream — Modular Architecture
 // ══════════════════════════════════════════════════════
 

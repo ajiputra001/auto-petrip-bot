@@ -8,7 +8,7 @@
  */
 async function handleMenu(msg) {
     let menu = `╔════════════════════════╗\n`;
-    menu += `    🏛️  *AJIPUTRA COMMAND CENTER v4.1*  🏛️\n`;
+    menu += `    📊  *AUTOBOT COMMAND CENTER v1.0*  📊\n`;
     menu += `╚════════════════════════╝\n\n`;
 
     menu += `┌─⚡ *MANAJEMEN WORKER LOKAL*\n`;
@@ -35,7 +35,7 @@ async function handleMenu(msg) {
     menu += `│ 📊 \`/status\` _(Server Diagnostic)_\n`;
     menu += `└─────────────────────────\n\n`;
 
-    menu += `🤖 _Sovereign Smart Core v4.1 — Modular Core_`;
+    menu += `🤖 System Autobot Powered By Ajiputra-tech`;
 
     return msg.reply(menu);
 }

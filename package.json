@@ -1,6 +1,6 @@
 {
-  "name": "ajiputra-bot-v4-auto",
-  "version": "4.0.0",
+  "name": "ajiputra-bot-v1-auto",
+  "version": "1.0.0",
   "description": "🚀 AJIPUTRA BOT — Sovereign Telemetry WhatsApp Automation Engine",
   "main": "index.js",
   "scripts": {

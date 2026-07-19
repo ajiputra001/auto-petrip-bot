@@ -77,7 +77,7 @@ async function handleStatus(msg) {
     teks += `   • Master SS: ${screenshotsStats.count} file (${screenshotsStats.sizeMB} MB)\n`;
     teks += `   • Log File : ${logSize}\n\n`;
     teks += `🤖 *Bot Engine*\n`;
-    teks += `   • Version  : v4.1 Sovereign Smart Core\n`;
+    teks += `   • Version  : v1.0 Sovereign Smart Core\n`;
     teks += `   • Drivers  : ${totalDrivers} terdaftar\n`;
     teks += `   • Engine   : 🟢 Running (Standby)\n`;
     teks += `\n━━━━━━━━━━━━━━━━━━━━━━━━`;

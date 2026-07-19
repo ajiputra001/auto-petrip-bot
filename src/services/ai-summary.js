@@ -64,10 +64,10 @@ function generateRingkasanKerja(driver) {
     }
 
     const penutup = acak([
-        '\n\n🤖 *Rekomendasi AI*: LAYAK OPERASI TINGKAT A.',
-        '\n\n🤖 *Rekomendasi AI*: ZONA AMAN OPERASIONAL TERVERIFIKASI.',
-        '\n\n🤖 *Rekomendasi AI*: ASESMEN METRIK K3 MEMENUHI SYARAT.',
-        '\n\n🤖 *Rekomendasi AI*: STATUS CLEARANCE — DIIZINKAN BEROPERASI.',
+        '\n\n🤖 *Autobot*: LAYAK OPERASI TINGKAT A.',
+        '\n\n🤖 *Autobot*: ZONA AMAN OPERASIONAL TERVERIFIKASI.',
+        '\n\n🤖 *Autobot*: ASESMEN METRIK K3 MEMENUHI SYARAT.',
+        '\n\n🤖 *Autobot*: STATUS CLEARANCE — DIIZINKAN BEROPERASI.',
     ]);
 
     return `${pembuka} ${performaKognitif} ${kesimpulanMedis}${penutup}`;

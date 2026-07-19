@@ -30,7 +30,18 @@ git clone https://github.com/ajiputra001/auto-petrip-bot.git
 cd auto-petrip-bot
 ```
 
-### 2. Pasang Dependensi Node.js & Linux
+### 2. Jalankan Skrip Instalasi Otomatis (Direkomendasikan)
+Kami telah menyediakan skrip instalasi otomatis yang mendukung **Debian 11, 12, 13** dan **Ubuntu 20, 22, 24**. Skrip ini akan otomatis memperbarui paket sistem, menginstal/meng-upgrade Node.js (minimal versi 18), memasang seluruh dependensi sistem operasi yang diperlukan Google Chrome secara universal, serta menginstal dependensi Node.js.
+
+Jalankan perintah berikut:
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+*(Atau jika Anda ingin melakukan instalasi secara manual, silakan ikuti langkah di bawah ini).*
+
+### 3. Instalasi Manual (Opsional)
 Pasang library Node.js yang dibutuhkan:
 ```bash
 npm install
@@ -42,16 +53,17 @@ Karena bot ini menggunakan headless browser Puppeteer (Google Chrome), pasang de
 sudo apt update
 
 # Pasang dependensi Chrome di VPS Ubuntu/Debian
-sudo apt install -y gconf-service libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 \
+sudo apt install -y libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 \
 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 \
 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 \
 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation \
-libappindicator1 libnss3 lsb-release xdg-utils wget libgbm-dev
+libnss3 lsb-release xdg-utils wget libgbm-dev
 ```
+*(Catatan: Untuk Ubuntu 24.04 dan Debian 13, ganti `libasound2` dengan `libasound2t64` jika terjadi kesalahan paket tidak ditemukan).*
 
 Pastikan juga cache binary Chrome untuk Puppeteer terpasang:
 ```bash
-npx puppeteer folders install chrome
+npx puppeteer browsers install chrome
 ```
 
 ### 3. Konfigurasi Environment (`.env`)
