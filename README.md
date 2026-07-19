@@ -14,7 +14,7 @@ Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX 
 ---
 
 ## 📋 Persyaratan Sistem
-* **VPS/Server**: Linux Ubuntu (direkomendasikan) / Debian / CentOS
+* **VPS/Server**: Linux Ubuntu (direkomendasikan) / Debian / Ubuntu
 * **Node.js**: Versi `18.x` atau lebih baru
 * **NPM**: Versi `9.x` atau lebih baru
 * **Git**: Terpasang di VPS
@@ -66,8 +66,8 @@ nano .env
 ```
 Isi variabel yang ada sesuai dengan kebutuhan Anda:
 ```env
-WA_ADMIN=6285641858425@c.us              # ID WhatsApp Administrator
-WA_GRUP=120363428647430557@g.us          # JID Grup WhatsApp Laporan
+WA_ADMIN=6285xxxxx2x5@c.us              # ID WhatsApp Administrator
+WA_GRUP=12xxxxxxx0557@g.us          # JID Grup WhatsApp Laporan
 FORM_URL=https://docs.google.com/forms/... # Link Google Form SPX utama
 CRON_SCHEDULE=0 8 * * *                  # Jadwal absen otomatis (Setiap jam 08:00 Pagi)
 CRON_TIMEZONE=Asia/Jakarta               # Zona waktu cron scheduler
@@ -82,7 +82,7 @@ Agar bot mengetahui daftar driver yang harus diabsenkan, buat/sesuaikan file kon
   [
       {
           "nama": "Randi",
-          "id": "220904",
+          "id": "2xxx04",
           "usia": "31",
           "reaksi": "268",
           "fileCookie": "cookie_randi.json",
