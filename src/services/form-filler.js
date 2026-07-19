@@ -102,7 +102,12 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
             await progress.update(4, 'Mengonfirmasi opsi libur & Mengirimkan form...');
             await delay(3000);
             await klikTombolTeks(page, 'Kirim', 'Submit');
-            await delay(5000);
+            await delay(6000);
+
+            const currentUrl = page.url();
+            if (!currentUrl.includes('formResponse')) {
+                throw new Error('Gagal memverifikasi pengiriman libur: Halaman Google Form tidak beralih ke halaman sukses.');
+            }
 
             await progress.update(4, '🚀 Form Sukses Terkirim!');
             await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI);
@@ -191,7 +196,13 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
 
         // Submit!
         await klikTombolTeks(page, 'Kirim', 'Submit');
-        await delay(5000);
+        await delay(6000);
+
+        // Verifikasi apakah halaman beralih ke halaman respon sukses
+        const currentUrl = page.url();
+        if (!currentUrl.includes('formResponse')) {
+            throw new Error('Gagal memverifikasi pengiriman: Halaman Google Form tidak beralih ke halaman sukses. Silakan cek apakah cookie masih aktif atau ada data wajib yang tidak terisi dengan benar.');
+        }
 
         await progress.update(4, '🚀 Form Sukses Terkirim!');
         await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI);
