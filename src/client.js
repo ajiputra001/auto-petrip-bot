@@ -69,7 +69,12 @@ function createClient() {
                     if (Msg && Msg.get && !Msg.get.isPatched) {
                         const originalGet = Msg.get;
                         Msg.get = function (id) {
-                            let res = originalGet.call(this, id);
+                            let res;
+                            try {
+                                res = originalGet.call(this, id);
+                            } catch (e) {
+                                // Ignore error if originalGet fails on string parameter
+                            }
                             if (!res && id) {
                                 const list = this.toArray ? this.toArray() : (this.models || []);
                                 res = list.find(m => m.id && (m.id._serialized === id || m.id.$1 === id));
