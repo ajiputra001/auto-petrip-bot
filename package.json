@@ -1,0 +1,23 @@
+{
+  "name": "ajiputra-bot-v4-auto",
+  "version": "4.0.0",
+  "description": "🚀 AJIPUTRA BOT — Sovereign Telemetry WhatsApp Automation Engine",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "check": "node --check index.js"
+  },
+  "keywords": ["whatsapp", "bot", "automation", "google-form"],
+  "author": "AJIPUTRA",
+  "license": "MIT",
+  "dependencies": {
+    "whatsapp-web.js": "^1.26.1-alpha.3",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "node-cron": "^3.0.3",
+    "qrcode-terminal": "^0.12.0",
+    "dotenv": "^16.4.7",
+    "chalk": "^4.1.2"
+  }
+}
