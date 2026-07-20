@@ -8,7 +8,7 @@
  */
 async function handleMenu(msg) {
     let menu = `╔════════════════════════╗\n`;
-    menu += `    📊  *AUTOBOT COMMAND CENTER v1.0*  📊\n`;
+    menu += `    📊  *AUTOBOT COMMAND CENTER*  📊\n`;
     menu += `╚════════════════════════╝\n\n`;
 
     menu += `┌─⚡ *MANAJEMEN WORKER LOKAL*\n`;

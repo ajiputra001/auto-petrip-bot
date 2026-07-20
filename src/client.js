@@ -77,8 +77,23 @@ function createClient() {
                                 // Ignore error if originalGet fails on string parameter
                             }
                             if (!res && id) {
-                                const list = this.toArray ? this.toArray() : (this.models || []);
-                                res = list.find(m => m.id && (m.id._serialized === id || m.id.$1 === id));
+                                const norm = (val) => {
+                                    if (typeof val === 'string') return val.replace(/@lid/g, '@c.us');
+                                    if (val && typeof val === 'object' && typeof val._serialized === 'string') {
+                                        return val._serialized.replace(/@lid/g, '@c.us');
+                                    }
+                                    return '';
+                                };
+                                const target = norm(id);
+                                if (target) {
+                                    const list = this.toArray ? this.toArray() : (this.models || []);
+                                    res = list.find(m => {
+                                        if (!m.id) return false;
+                                        const mId = norm(m.id);
+                                        const mIdS1 = norm(m.id.$1);
+                                        return (mId && mId === target) || (mIdS1 && mIdS1 === target);
+                                    });
+                                }
                             }
                             return res;
                         };
