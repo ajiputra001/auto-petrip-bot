@@ -24,6 +24,7 @@ function createClient() {
             timeout: config.browserTimeout,
             protocolTimeout: config.browserTimeout,
             args: config.puppeteerArgs,
+            dumpio: true,
         },
     });
 

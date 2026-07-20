@@ -32,6 +32,7 @@ async function launchBrowser(sessionPath, retryCount = config.maxRetry) {
                 executablePath: config.chromePath,
                 timeout: config.browserTimeout,
                 args: config.puppeteerArgs,
+                dumpio: true,
             });
 
             logger.success('BROWSER', 'Chrome berhasil diluncurkan.');

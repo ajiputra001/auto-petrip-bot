@@ -117,6 +117,8 @@ apt-get install -y \
     libcups2 \
     libdbus-1-3 \
     libdrm2 \
+    libexpat1 \
+    libfontconfig1 \
     libgbm1 \
     libgbm-dev \
     libglib2.0-0 \
@@ -135,6 +137,7 @@ apt-get install -y \
     libxext6 \
     libxfixes3 \
     libxi6 \
+    libxkbcommon0 \
     libxrandr2 \
     libxrender1 \
     libxss1 \
