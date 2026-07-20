@@ -70,6 +70,9 @@ const config = {
         '--no-first-run',
         '--disable-extensions',
         '--mute-audio',
+        '--log-level=3',
+        '--disable-webgl',
+        '--disable-software-rasterizer',
     ],
 };
 
