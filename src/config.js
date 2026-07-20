@@ -69,6 +69,7 @@ const config = {
         '--no-zygote',
         '--no-first-run',
         '--disable-extensions',
+        '--mute-audio',
     ],
 };
 
