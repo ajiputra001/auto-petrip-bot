@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js",
+    "dev": "node --watch-path=src --watch-path=index.js index.js",
     "check": "node --check index.js"
   },
   "keywords": ["whatsapp", "bot", "automation", "google-form"],
