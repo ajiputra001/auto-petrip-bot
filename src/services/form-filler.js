@@ -255,9 +255,9 @@ INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
     pesan += `🤖 _System Powered by Ajiputra-tech v1.0_${disclaimer}`;
 
     try {
-        await waClient.sendMessage(driver.noWa, pesan);
+        await waClient.sendMessage(config.waGrup, pesan);
     } catch (e) {
-        logger.warn(driver.nama, `Gagal kirim laporan ke WA: ${e.message}`);
+        logger.warn(driver.nama, `Gagal kirim laporan ke Grup WA: ${e.message}`);
     }
 }
 
