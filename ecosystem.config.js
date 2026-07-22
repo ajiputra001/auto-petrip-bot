@@ -3,6 +3,7 @@ module.exports = {
     {
       name: 'auto-petrip-bot',
       script: 'index.js',
+      exec_mode: 'fork',
       instances: 1,
       autorestart: true,
       watch: false, // Disarankan false untuk produksi agar tidak restart tiba-tiba
