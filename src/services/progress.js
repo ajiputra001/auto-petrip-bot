@@ -84,23 +84,66 @@ class ProgressTracker {
         template += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         template += `🖥️ System: Powered By Ajiputra-tech`;
 
+        await this._editPesan(template);
+        await delay(2000); // Delay aman pelolosan rate-limit WA
+    }
+
+    /**
+     * Edit pesan WhatsApp secara robust dengan 3 tingkat fallback (termasuk direct browser injection)
+     * @param {string} teks 
+     */
+    async _editPesan(teks) {
+        if (!this.liveMsg) return;
+
+        const serializedId = this.liveMsg.id ? this.liveMsg.id._serialized : null;
+
+        // 1. Coba edit langsung lewat object liveMsg
         try {
-            // Re-hydrate message instance untuk pastikan .edit() bekerja
-            const freshMsg = await this.client.getMessageById(this.liveMsg.id._serialized);
-            if (freshMsg) {
-                await freshMsg.edit(template);
-            } else {
-                await this.liveMsg.edit(template);
-            }
-            await delay(2500); // Delay aman pelolosan rate-limit WA
-        } catch (e) {
-            // Fallback: coba edit langsung tanpa re-hydrate
+            const res = await this.liveMsg.edit(teks);
+            if (res) return;
+        } catch (e) { /* lanjut fallback */ }
+
+        // 2. Coba getMessageById lalu .edit()
+        if (serializedId) {
             try {
-                await this.liveMsg.edit(template);
-                await delay(2500);
+                const freshMsg = await this.client.getMessageById(serializedId);
+                if (freshMsg) {
+                    const res = await freshMsg.edit(teks);
+                    if (res) return;
+                }
+            } catch (e) { /* lanjut fallback */ }
+        }
+
+        // 3. Fallback Khusus VPS: Direct Injection ke Browser WA Web Store
+        if (serializedId && this.client.pupPage) {
+            try {
+                await this.client.pupPage.evaluate(async (msgId, newContent) => {
+                    try {
+                        const Msg = window.require('WAWebCollections').Msg;
+                        let targetMsg = Msg.get ? Msg.get(msgId) : null;
+
+                        if (!targetMsg && Msg.models) {
+                            const norm = s => typeof s === 'string' ? s.replace(/@lid/g, '@c.us') : '';
+                            const targetNorm = norm(msgId);
+                            targetMsg = Msg.models.find(m => {
+                                if (!m.id) return false;
+                                const mId = norm(m.id._serialized || m.id);
+                                const mIdS1 = m.id && m.id.$1 ? norm(m.id.$1) : '';
+                                return (mId && mId === targetNorm) || (mIdS1 && mIdS1 === targetNorm);
+                            });
+                        }
+
+                        if (targetMsg) {
+                            await window.require('WAWebSendMessageEditAction').sendMessageEdit(targetMsg, newContent, {});
+                            return true;
+                        }
+                    } catch (err) {
+                        console.error('Direct edit error in browser:', err);
+                    }
+                    return false;
+                }, serializedId, teks);
             } catch (err) {
-                // Gunakan debug level agar log tidak terlalu berisik jika terjadi rate-limit kecil
-                logger.debug('PROGRESS', `Gagal update WA progress: ${err.message}`);
+                logger.debug('PROGRESS', `Direct edit browser gagal: ${err.message}`);
             }
         }
     }
@@ -110,17 +153,7 @@ class ProgressTracker {
      * @param {string} teks - Pesan akhir
      */
     async finish(teks) {
-        if (!this.liveMsg) return;
-        try {
-            const freshMsg = await this.client.getMessageById(this.liveMsg.id._serialized);
-            if (freshMsg) {
-                await freshMsg.edit(teks);
-            } else {
-                await this.liveMsg.edit(teks);
-            }
-        } catch (e) {
-            try { await this.liveMsg.edit(teks); } catch (err) { /* abaikan */ }
-        }
+        await this._editPesan(teks);
     }
 }
 
