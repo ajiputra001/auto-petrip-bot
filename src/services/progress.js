@@ -115,33 +115,58 @@ class ProgressTracker {
         }
 
         // 3. Fallback Khusus VPS: Direct Injection ke Browser WA Web Store
-        if (serializedId && this.client.pupPage) {
+        if (this.client && this.client.pupPage) {
             try {
-                await this.client.pupPage.evaluate(async (msgId, newContent) => {
+                const msgKey = this.liveMsg.id ? (this.liveMsg.id.id || '') : '';
+                await this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
                     try {
                         const Msg = window.require('WAWebCollections').Msg;
-                        let targetMsg = Msg.get ? Msg.get(msgId) : null;
+                        const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
+                        if (!models || models.length === 0) return false;
 
-                        if (!targetMsg && Msg.models) {
-                            const norm = s => typeof s === 'string' ? s.replace(/@lid/g, '@c.us') : '';
-                            const targetNorm = norm(msgId);
-                            targetMsg = Msg.models.find(m => {
-                                if (!m.id) return false;
-                                const mId = norm(m.id._serialized || m.id);
-                                const mIdS1 = m.id && m.id.$1 ? norm(m.id.$1) : '';
-                                return (mId && mId === targetNorm) || (mIdS1 && mIdS1 === targetNorm);
+                        // Clean key extraction (hilangkan @c.us/@lid/prefix)
+                        const extractKey = (str) => {
+                            if (!str || typeof str !== 'string') return '';
+                            const parts = str.split('_');
+                            return parts.length >= 3 ? parts[2] : str;
+                        };
+
+                        const targetKey = rawKey || extractKey(msgId);
+
+                        let targetMsg = models.find(m => {
+                            if (!m || !m.id) return false;
+                            const sId = m.id._serialized || '';
+                            const mKey = m.id.id || extractKey(sId);
+                            if (targetKey && (sId.includes(targetKey) || mKey === targetKey)) return true;
+                            return false;
+                        });
+
+                        // Robust fallback: cari pesan outgoing terakhir yang memiliki teks loader bot
+                        if (!targetMsg) {
+                            targetMsg = [...models].reverse().find(m => {
+                                if (!m || !m.id) return false;
+                                const isFromMe = m.id.fromMe || m.fromMe;
+                                const body = m.body || m.caption || '';
+                                return isFromMe && (
+                                    body.includes('SYSTEM RUNNING') ||
+                                    body.includes('AJIPUTRA AUTOMATION ENGINE') ||
+                                    body.includes('LIVE TELEMETRY')
+                                );
                             });
                         }
 
                         if (targetMsg) {
-                            await window.require('WAWebSendMessageEditAction').sendMessageEdit(targetMsg, newContent, {});
-                            return true;
+                            const editAction = window.require('WAWebSendMessageEditAction');
+                            if (editAction && editAction.sendMessageEdit) {
+                                await editAction.sendMessageEdit(targetMsg, newContent, {});
+                                return true;
+                            }
                         }
                     } catch (err) {
                         console.error('Direct edit error in browser:', err);
                     }
                     return false;
-                }, serializedId, teks);
+                }, serializedId, msgKey, teks);
             } catch (err) {
                 logger.debug('PROGRESS', `Direct edit browser gagal: ${err.message}`);
             }
