@@ -27,7 +27,7 @@ const ROOT_DIR = path.join(__dirname, '..');
 
 const config = {
     // ── WhatsApp Targets ──
-    waAdmin: process.env.WA_ADMIN || '6285641858425@c.us',
+    waAdmin: process.env.WA_ADMIN || process.env.WA_GRUP || '120363428647430557@g.us',
     waGrup: process.env.WA_GRUP || '120363428647430557@g.us',
 
     // ── Google Form ──

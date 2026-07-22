@@ -270,9 +270,9 @@ async function _kirimAlertCookieExpired(waClient, driver) {
     const driverMsg = `⚠️ *PERINGATAN SINKRONISASI AKUN* ⚠️\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHalo *${driver.nama}*,\n\nSesi login Google Account Anda di sistem kami telah *KEDALUWARSA / LOGOUT*.\n\nMohon segera perbarui cookie Anda dengan cara:\n1️⃣ Dapatkan file JSON cookie baru dari browser laptop/HP Anda.\n2️⃣ Kirim file JSON tersebut ke nomor bot ini dengan teks caption:\n\`/updatecookie ${driver.nama.split(' ')[0]}\`\n\n_Sistem tidak dapat mengisi absen otomatis Anda sampai cookie diperbarui._`;
 
     try {
-        await waClient.sendMessage(config.waAdmin, adminMsg);
+        await waClient.sendMessage(config.waGrup, adminMsg);
     } catch (e) {
-        logger.warn('ALERT', `Gagal mengirim alert cookie expired ke Admin: ${e.message}`);
+        logger.warn('ALERT', `Gagal mengirim alert cookie expired ke Grup: ${e.message}`);
     }
 
     try {
