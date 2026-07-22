@@ -347,7 +347,7 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
     const tanggal = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
     let rekap = `╔════════════════════════╗\n`;
-    rekap += `    📊*REPORT HARIAN AUTO-PETRIP SPX*📊\n`;
+    rekap += `📊*REPORT HARIAN AUTO-PETRIP*📊\n`;
     rekap += `╚════════════════════════╝\n\n`;
     rekap += `📅 *Waktu*     : ${tanggal}\n`;
     rekap += `👥 *Total Data* : ${drivers.length} Driver\n`;
