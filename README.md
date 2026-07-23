@@ -10,6 +10,7 @@ Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX 
 * **Manajemen Database Dinamis (CRUD)**: Kelola driver, jadwal libur, cookie, dan berkas screenshot reaksi langsung melalui perintah chat WhatsApp.
 * **Self-Healing Engine**: Membersihkan sisa-sisa kegagalan browser/crash otomatis sebelum inisialisasi ulang agar penggunaan RAM VPS tetap aman.
 * **Auto-alert Cookie Expired**: Memberikan peringatan instan ke driver bersangkutan dan administrator ketika sesi Google Account terputus.
+* **Smart Robust Downloader & Typo Assistant**: Pengunduhan media otomatis yang mendukung pesan balasan (*reply*) serta pemetaan nama driver toleran salah ketik (*fuzzy match*).
 
 ---
 
