@@ -1,8 +1,9 @@
 // ══════════════════════════════════════════
-// 🎮 COMMAND ROUTER — Pusat Routing Semua Perintah
+// 🎮 COMMAND ROUTER — Pusat Routing & Smart Assistant
 // ══════════════════════════════════════════
 
 const logger = require('../utils/logger');
+const { hitungKemiripan } = require('../utils/helpers');
 
 // Import semua command handler
 const { handleMenu } = require('./menu');
@@ -13,32 +14,43 @@ const { handleStatus } = require('./status');
 const { handleAbsen, handleAbsenManual } = require('./absen');
 
 /**
+ * Daftar semua perintah resmi untuk kecerdasan rekomendasi typo
+ */
+const KNOWN_COMMANDS = [
+    '/menu', '/bantuan',
+    '/tambahdriver', '/editdriver', '/hapusdriver', '/listdriver',
+    '/setlibur', '/setmasuk', '/ceklibur',
+    '/updatefoto', '/updatecookie',
+    '/status', '/absen', '/absenmanual'
+];
+
+/**
  * Definisi routing perintah
- * Format: { match, handler, needsClient }
+ * Format: { match, handler }
  */
 const ROUTES = [
     // Menu
     { match: (cmd) => cmd === '/menu' || cmd === '/bantuan', handler: handleMenu },
 
     // Driver CRUD
-    { match: (cmd) => cmd.startsWith('/tambahdriver '), handler: handleTambahDriver },
-    { match: (cmd) => cmd.startsWith('/editdriver '),   handler: handleEditDriver },
-    { match: (cmd) => cmd.startsWith('/hapusdriver '),   handler: handleHapusDriver },
-    { match: (cmd) => cmd === '/listdriver',              handler: handleListDriver },
+    { match: (cmd) => cmd.startsWith('/tambahdriver ') || cmd === '/tambahdriver', handler: handleTambahDriver },
+    { match: (cmd) => cmd.startsWith('/editdriver ') || cmd === '/editdriver',   handler: handleEditDriver },
+    { match: (cmd) => cmd.startsWith('/hapusdriver ') || cmd === '/hapusdriver',  handler: handleHapusDriver },
+    { match: (cmd) => cmd === '/listdriver',                                     handler: handleListDriver },
 
     // Jadwal
-    { match: (cmd) => cmd.startsWith('/setlibur '),  handler: handleSetLibur },
-    { match: (cmd) => cmd.startsWith('/setmasuk '),  handler: handleSetMasuk },
-    { match: (cmd) => cmd === '/ceklibur',            handler: handleCekLibur },
+    { match: (cmd) => cmd.startsWith('/setlibur ') || cmd === '/setlibur',  handler: handleSetLibur },
+    { match: (cmd) => cmd.startsWith('/setmasuk ') || cmd === '/setmasuk',  handler: handleSetMasuk },
+    { match: (cmd) => cmd === '/ceklibur',                                   handler: handleCekLibur },
 
     // Media
-    { match: (cmd) => cmd.startsWith('/updatefoto ') || cmd.startsWith('/update foto '),     handler: handleUpdateFoto },
-    { match: (cmd) => cmd.startsWith('/updatecookie ') || cmd.startsWith('/update cookie '), handler: handleUpdateCookie },
+    { match: (cmd) => cmd.startsWith('/updatefoto') || cmd.startsWith('/update foto'),     handler: handleUpdateFoto },
+    { match: (cmd) => cmd.startsWith('/updatecookie') || cmd.startsWith('/update cookie'), handler: handleUpdateCookie },
 
     // System
     { match: (cmd) => cmd === '/status',      handler: handleStatus },
-    { match: (cmd) => cmd === '/absenmanual', handler: handleAbsenManual, needsClient: true },
-    { match: (cmd) => cmd.startsWith('/absen '), handler: handleAbsen, needsClient: true },
+    { match: (cmd) => cmd === '/absenmanual', handler: handleAbsenManual },
+    { match: (cmd) => cmd.startsWith('/absen ') || cmd === '/absen', handler: handleAbsen },
 ];
 
 // ── Anti-Duplikat: Cache ID pesan yang sudah diproses ──
@@ -115,14 +127,40 @@ function registerCommandRouter(client) {
             };
 
             // Cari route yang cocok
+            let matched = false;
             for (const route of ROUTES) {
                 if (route.match(pesanLower)) {
+                    matched = true;
                     logger.info('COMMAND', `${pesanLower.split(' ')[0]} dari ${msg.from}`);
 
-                    // Selalu oper client untuk fungsi yang butuh
+                    // Selalu oper client untuk fungsi yang membutuhkan
                     await route.handler(msg, pesan, client);
                     return; // Stop setelah match pertama
                 }
+            }
+
+            // Jika tidak ada route yang cocok, berikan rekomendasi cerdas (Smart Typo Recommendation)
+            if (!matched) {
+                const cmdKeyword = pesanLower.split(' ')[0];
+                let bestMatch = null;
+                let minDistance = Infinity;
+
+                KNOWN_COMMANDS.forEach(k => {
+                    const dist = hitungKemiripan(cmdKeyword, k);
+                    if (dist <= 3 && dist < minDistance) {
+                        minDistance = dist;
+                        bestMatch = k;
+                    }
+                });
+
+                let balasanSaran = `❌ Perintah *${cmdKeyword}* tidak dikenali.`;
+                if (bestMatch) {
+                    const sisaArg = pesan.substring(cmdKeyword.length);
+                    balasanSaran += `\n\n💡 *Apakah maksud Anda*: \`${bestMatch}${sisaArg}\`?`;
+                }
+                balasanSaran += `\n\n📜 Ketik \`/menu\` untuk melihat seluruh daftar perintah resmi.`;
+
+                return await msg.reply(balasanSaran);
             }
         } catch (err) {
             logger.error('COMMAND', `Error saat memproses perintah: ${err.message}`);
@@ -133,7 +171,7 @@ function registerCommandRouter(client) {
         }
     });
 
-    logger.success('ROUTER', `${ROUTES.length} perintah terdaftar & siap digunakan.`);
+    logger.success('ROUTER', `${ROUTES.length} perintah terdaftar & siap digunakan dengan Smart Assistance.`);
 }
 
 module.exports = { registerCommandRouter };

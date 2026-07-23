@@ -83,19 +83,16 @@ class Database {
     }
 
     /**
-     * Cari driver berdasarkan nama (fuzzy match)
-     * @param {string} nama - Nama driver (parsial)
-     * @returns {{ driver: Object|null, index: number }}
+     * Cari driver berdasarkan nama (fuzzy match cerdas + typo tolerance)
+     * @param {string} nama - Nama driver
+     * @returns {{ driver: Object|null, index: number, isFuzzy: boolean }}
      */
     findDriver(nama) {
         const drivers = this.getAllDrivers();
-        const namaLower = nama.toLowerCase().trim();
-        const index = drivers.findIndex(d => d.nama.toLowerCase().includes(namaLower));
-        return {
-            driver: index !== -1 ? drivers[index] : null,
-            index,
-        };
+        const { cariDriver } = require('./utils/helpers');
+        return cariDriver(drivers, nama);
     }
+
 
     /**
      * Tambah driver baru

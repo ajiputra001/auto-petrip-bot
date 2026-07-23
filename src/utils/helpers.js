@@ -77,18 +77,92 @@ function generateNamaScreenshotTanggal() {
 }
 
 /**
- * Cari driver dari array berdasarkan nama (fuzzy match)
+/**
+ * Hitung jarak Levenshtein antara dua kata (jarak typo/kemiripan)
+ * @param {string} a 
+ * @param {string} b 
+ * @returns {number} Distance (0 = identik)
+ */
+function hitungKemiripan(a, b) {
+    a = (a || '').toLowerCase().trim();
+    b = (b || '').toLowerCase().trim();
+    if (a === b) return 0;
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+                );
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
+/**
+ * Cari driver dari array berdasarkan nama (fuzzy match cerdas + Levenshtein)
  * @param {Array} drivers - Array data driver
  * @param {string} inputNama - Nama yang dicari
- * @returns {{ driver: Object|null, index: number }} Hasil pencarian
+ * @returns {{ driver: Object|null, index: number, isFuzzy: boolean }} Hasil pencarian
  */
 function cariDriver(drivers, inputNama) {
+    if (!inputNama || !drivers || drivers.length === 0) {
+        return { driver: null, index: -1, isFuzzy: false };
+    }
     const namaLower = inputNama.toLowerCase().trim();
-    const index = drivers.findIndex(d => d.nama.toLowerCase().includes(namaLower));
-    return {
-        driver: index !== -1 ? drivers[index] : null,
-        index,
-    };
+
+    // 1. Substring / Includes Match
+    let index = drivers.findIndex(d => d.nama.toLowerCase().includes(namaLower));
+    if (index !== -1) {
+        return { driver: drivers[index], index, isFuzzy: false };
+    }
+
+    // 2. Word-by-word Substring Match
+    index = drivers.findIndex(d => {
+        const words = d.nama.toLowerCase().split(' ');
+        return words.some(w => w.startsWith(namaLower) || namaLower.startsWith(w));
+    });
+    if (index !== -1) {
+        return { driver: drivers[index], index, isFuzzy: true };
+    }
+
+    // 3. Levenshtein Distance Match (Smart Typo Tolerance)
+    let bestMatch = null;
+    let bestIndex = -1;
+    let minDistance = Infinity;
+
+    drivers.forEach((d, i) => {
+        const fullNama = d.nama.toLowerCase();
+        const firstWord = fullNama.split(' ')[0];
+
+        const distFull = hitungKemiripan(namaLower, fullNama);
+        const distFirst = hitungKemiripan(namaLower, firstWord);
+        const dist = Math.min(distFull, distFirst);
+
+        // Toleransi max 2 karakter typo untuk kata pendek, max 3 untuk kata panjang
+        const maxAllowed = namaLower.length <= 4 ? 1 : 2;
+        if (dist <= maxAllowed && dist < minDistance) {
+            minDistance = dist;
+            bestMatch = d;
+            bestIndex = i;
+        }
+    });
+
+    if (bestMatch) {
+        return { driver: bestMatch, index: bestIndex, isFuzzy: true };
+    }
+
+    return { driver: null, index: -1, isFuzzy: false };
 }
 
 /**
@@ -145,9 +219,11 @@ module.exports = {
     getHariIni,
     generateNamaScreenshot,
     generateNamaScreenshotTanggal,
+    hitungKemiripan,
     cariDriver,
     ensureDir,
     bacaJSON,
     tulisJSON,
     hapusFileAman,
 };
+
