@@ -7,7 +7,7 @@ Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX 
 ## ⚡ Fitur Utama
 * **Virtual Live Telemetry Terminal UI**: Update status loading berjalan secara interaktif langsung di chat WhatsApp dengan *progress bar*, durasi pengerjaan, dan status check untuk setiap tahapan.
 * **Autobot Summary Generator**: Menghasilkan ringkasan kondisi medis dan kesiapan berkendara sopir secara variatif menggunakan modul generator bahasa alami.
-* **Manajemen Database Dinamis (CRUD)**: Kelola driver, jadwal libur, cookie, dan berkas screenshot master langsung melalui perintah chat WhatsApp.
+* **Manajemen Database Dinamis (CRUD)**: Kelola driver, jadwal libur, cookie, dan berkas screenshot reaksi langsung melalui perintah chat WhatsApp.
 * **Self-Healing Engine**: Membersihkan sisa-sisa kegagalan browser/crash otomatis sebelum inisialisasi ulang agar penggunaan RAM VPS tetap aman.
 * **Auto-alert Cookie Expired**: Memberikan peringatan instan ke driver bersangkutan dan administrator ketika sesi Google Account terputus.
 
@@ -105,7 +105,7 @@ Agar bot mengetahui daftar driver yang harus diabsenkan, buat/sesuaikan file kon
   ```
   *Keterangan:*
   - `fileCookie`: Letakkan file JSON cookie driver di folder `cookies/cookie_randi.json`
-  - `fileSS`: Letakkan screenshot master driver di folder `screenshots/ss_randi.jpg`
+  - `fileSS`: Letakkan screenshot reaksi driver di folder `screenshots/ss_randi.jpg`
 
 * **`data/jadwal_libur.json`**
   ```json
@@ -159,7 +159,7 @@ Kirimkan perintah-perintah berikut ke nomor WhatsApp bot:
 | `/status` | Menampilkan status sistem, diagnostik VPS, & RAM | `/status` |
 | `/absen [Nama]` | Menjalankan absen paksa untuk driver tertentu | `/absen Randi` |
 | `/absenmanual` | Menjalankan absen untuk semua driver yang terdaftar | `/absenmanual` |
-| `/updatefoto [Nama]` | Memperbarui berkas screenshot master harian *(lampirkan foto)* | `/updatefoto Randi` (+ gambar) |
+| `/updatefoto [Nama]` | Memperbarui berkas screenshot reaksi harian *(lampirkan foto)* | `/updatefoto Randi` (+ gambar) |
 | `/updatecookie [Nama]` | Memperbarui file cookie session Google *(lampirkan JSON)* | `/updatecookie Randi` (+ file/teks JSON) |
 | `/libur [Nama] [Hari]` | Mengubah hari libur mingguan driver | `/libur Randi Minggu` |
 | `/masuk [Nama]` | Mengembalikan status driver kembali aktif bekerja penuh | `/masuk Randi` |

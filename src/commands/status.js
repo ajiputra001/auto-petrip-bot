@@ -74,7 +74,7 @@ async function handleStatus(msg) {
     teks += `   • Bebas    : ${freeRAM} MB\n\n`;
     teks += `💾 *Penyimpanan Bot*\n`;
     teks += `   • Cookies  : ${cookiesStats.count} file (${cookiesStats.sizeMB} MB)\n`;
-    teks += `   • Master SS: ${screenshotsStats.count} file (${screenshotsStats.sizeMB} MB)\n`;
+    teks += `   • SS Reaksi: ${screenshotsStats.count} file (${screenshotsStats.sizeMB} MB)\n`;
     teks += `   • Log File : ${logSize}\n\n`;
     teks += `🤖 *Bot Engine*\n`;
     teks += `   • Version  : v1.0 Sovereign Smart Core\n`;

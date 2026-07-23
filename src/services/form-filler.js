@@ -38,7 +38,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
             throw new Error(`Token Sesi Cookie kosong: ${driver.fileCookie}`);
         }
         if (!isLibur && !fs.existsSync(ssPath)) {
-            throw new Error(`Media file master kosong: ${driver.fileSS}`);
+            throw new Error(`Media file SS reaksi kosong: ${driver.fileSS}`);
         }
 
         // Buat copy temporary screenshot dengan nama Android-style
@@ -139,7 +139,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
         await ketikAman(page, textInputsP3[1], driver.reaksi);
 
         // ── Upload Screenshot ──
-        await progress.update(4, '📥 Upload berkas master harian...');
+        await progress.update(4, '📥 Upload berkas SS reaksi harian...');
         await klikTombolTeks(page, 'Tambahkan file', 'Add file');
 
         // Tunggu picker frame muncul

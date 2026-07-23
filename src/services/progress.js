@@ -63,7 +63,7 @@ class ProgressTracker {
             'Membuka Engine Google Chrome',
             'Membuka Form K3 SPX & Sinkronisasi',
             'Mengisi K3 Fatigue & Pengukuran Reaksi',
-            'Unggah Master SS & Tanda Tangan'
+            'Unggah SS Reaksi & Tanda Tangan'
         ];
 
         let template = `╔════════════════════════════╗\n`;

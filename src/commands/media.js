@@ -80,7 +80,7 @@ async function handleUpdateFoto(msg, pesan, waClient = null) {
     // Update database driver
     db.updateScreenshot(driver.nama, namaFileBaru);
 
-    let teks = `📸 *UPDATE FOTO MASTER BERHASIL*\n`;
+    let teks = `📸 *UPDATE FOTO REAKSI BERHASIL*\n`;
     teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     teks += `👤 Driver : *${driver.nama}*${isFuzzy ? ` _(Terdeteksi otomatis dari "${inputNama}")_` : ''}\n`;
     teks += `🆔 Driver ID : \`${driver.id}\`\n`;
@@ -88,7 +88,7 @@ async function handleUpdateFoto(msg, pesan, waClient = null) {
     teks += `📊 Ukuran   : *${ukuranKb} KB* (${media.mimetype || 'image/jpeg'})\n`;
     teks += `🛡️ Status SS : *VALID & TERHUBUNG*\n`;
     teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `⚡ *Autobot Engine*: Master screenshot siap digunakan untuk pengisian otomatis!`;
+    teks += `⚡ *Autobot Engine*: Screenshot reaksi siap digunakan untuk pengisian otomatis!`;
 
     return msg.reply(teks);
 }

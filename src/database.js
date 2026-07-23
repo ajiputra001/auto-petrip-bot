@@ -109,7 +109,7 @@ class Database {
             usia: data.usia,
             reaksi: data.reaksi,
             fileCookie: `cookie_${kataPertama}.json`,
-            fileSS: `master_${kataPertama}.jpg`,
+            fileSS: `reaksi_${kataPertama}.jpg`,
             noWa: data.noWa || config.waAdmin,
         };
 
@@ -292,7 +292,7 @@ class Database {
     }
 
     /**
-     * Cek apakah file screenshot master ada & valid (tidak kosong)
+     * Cek apakah file screenshot reaksi ada & valid (tidak kosong)
      */
     isScreenshotReady(driver) {
         const p = this.getScreenshotPath(driver);
