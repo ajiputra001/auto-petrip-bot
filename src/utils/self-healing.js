@@ -72,6 +72,8 @@ function registerErrorHandlers() {
             execSync('pkill -f chrome || true', { stdio: 'ignore' });
             execSync('pkill -f chromium || true', { stdio: 'ignore' });
         } catch (e) { /* abaikan */ }
+        // Keluar dari proses agar PM2/systemd otomatis melakukan auto-restart bersih
+        process.exit(1);
     });
 
     process.on('unhandledRejection', (reason, promise) => {

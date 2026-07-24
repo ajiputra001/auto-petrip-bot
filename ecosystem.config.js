@@ -6,6 +6,7 @@ module.exports = {
       exec_mode: 'fork',
       instances: 1,
       autorestart: true,
+      restart_delay: 3000,
       watch: false, // Disarankan false untuk produksi agar tidak restart tiba-tiba
       max_memory_restart: '1G',
       env: {

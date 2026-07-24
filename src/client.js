@@ -54,10 +54,10 @@ function createClient() {
     // ── Event: Disconnected ──
     client.on('disconnected', (reason) => {
         logger.error('CLIENT', `Terputus dari WhatsApp: ${reason}`);
-        logger.system('Mencoba reconnect dalam 10 detik...');
+        logger.system('Mematikan proses untuk auto-restart bersih oleh PM2 dalam 3 detik...');
         setTimeout(() => {
-            client.initialize();
-        }, 10000);
+            process.exit(1);
+        }, 3000);
     });
 
     // ── Event: Ready ──
