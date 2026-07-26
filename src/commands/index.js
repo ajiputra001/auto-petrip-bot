@@ -89,11 +89,27 @@ function registerCommandRouter(client) {
                 cleanupCache();
             }
 
+            // ── Skip pesan lokasi / live location / tipe media selain text, image, document ──
+            if (
+                msg.type === 'location' ||
+                msg.type === 'location_live' ||
+                msg.type === 'live_location' ||
+                msg.isLocation ||
+                (msg.type !== 'chat' && msg.type !== 'image' && msg.type !== 'document')
+            ) {
+                return;
+            }
+
             const pesan = msg.body ? msg.body.trim() : '';
             const pesanLower = pesan.toLowerCase();
 
             // Cek apakah pesan dimulai dengan /
             if (!pesanLower.startsWith('/')) return;
+
+            // Skip jika pesan diawali koordinat lokasi/angka (misal: /-6.1234,106.1234)
+            if (/^\/[-+]?\d+[\.,]\d+/.test(pesanLower)) {
+                return;
+            }
 
             // Ambil chat ID asli (bukan JID Linked Device @lid)
             const actualChatId = msg.id && msg.id.remote ? msg.id.remote : '';

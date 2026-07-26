@@ -70,6 +70,8 @@ const config = {
         '--no-first-run',
         '--disable-extensions',
         '--mute-audio',
+        '--disable-audio-output',
+        '--disable-alsa',
         '--log-level=3',
         '--disable-webgl',
         '--disable-software-rasterizer',

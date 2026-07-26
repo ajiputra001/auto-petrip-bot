@@ -24,7 +24,7 @@ function createClient() {
             timeout: config.browserTimeout,
             protocolTimeout: config.browserTimeout,
             args: config.puppeteerArgs,
-            dumpio: true,
+            dumpio: false,
         },
     });
 
@@ -114,6 +114,20 @@ function createClient() {
 
         // Aktifkan cron scheduler
         initScheduler(client);
+
+        // ── Connection Watchdog / Health Check berkala (setiap 3 menit) ──
+        setInterval(async () => {
+            try {
+                const state = await client.getState();
+                if (state !== 'CONNECTED') {
+                    logger.warn('WATCHDOG', `Koneksi WhatsApp terganggu (Status: ${state}). Merestart bot...`);
+                    process.exit(1);
+                }
+            } catch (err) {
+                logger.error('WATCHDOG', `Gagal mengecek status koneksi client (Browser frozen/closed): ${err.message}`);
+                process.exit(1);
+            }
+        }, 180000);
     });
 
     // Register command router
