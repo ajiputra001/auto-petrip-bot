@@ -7,6 +7,7 @@ module.exports = {
       instances: 1,
       autorestart: true,
       restart_delay: 3000,
+      cron_restart: '0 4 * * *', // Restart otomatis setiap jam 04:00 subuh agar browser selalu fresh
       watch: false, // Disarankan false untuk produksi agar tidak restart tiba-tiba
       max_memory_restart: '1G',
       env: {
