@@ -72,17 +72,30 @@ function bersihkanLogLama() {
         const logFile = config.logFile;
         if (fs.existsSync(logFile)) {
             const stats = fs.statSync(logFile);
-            const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+            const MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
 
             if (stats.size > MAX_SIZE_BYTES) {
-                const lines = fs.readFileSync(logFile, 'utf8').split('\n');
-                const lineKeep = lines.slice(-2000).join('\n');
-                fs.writeFileSync(logFile, lineKeep, 'utf8');
-                logger.success('SELF-HEALING', `File log ${path.basename(logFile)} dipangkas otomatis (menyimpan 2000 baris terakhir).`);
+                // Baca hanya 64KB terakhir dari file untuk mencegah Out-Of-Memory (std::bad_alloc)
+                const readSize = Math.min(stats.size, 64 * 1024);
+                const buffer = Buffer.alloc(readSize);
+                const fd = fs.openSync(logFile, 'r');
+                fs.readSync(fd, buffer, 0, readSize, stats.size - readSize);
+                fs.closeSync(fd);
+
+                const tailText = buffer.toString('utf8');
+                const lines = tailText.split('\n').slice(1).join('\n');
+
+                fs.writeFileSync(logFile, `--- LOG TRUNCATED (${new Date().toISOString()}) ---\n` + lines, 'utf8');
+                logger.success('SELF-HEALING', `File log ${path.basename(logFile)} dipangkas aman (64KB baris terbaru).`);
             }
         }
     } catch (e) {
-        // Abaikan jika ada error pemangkasan log
+        // Fallback aman: jika gagal, kosongkan file log
+        try {
+            if (fs.existsSync(config.logFile)) {
+                fs.writeFileSync(config.logFile, '', 'utf8');
+            }
+        } catch (err) { /* abaikan */ }
     }
 }
 
