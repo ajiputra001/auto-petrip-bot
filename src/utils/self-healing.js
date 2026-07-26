@@ -58,7 +58,32 @@ function bersihkanSisaCrash() {
         // Abaikan error
     }
 
+    // 4. Rotasi / Pemangkasan log lokal jika > 5MB
+    bersihkanLogLama();
+
     logger.success('SELF-HEALING', 'Pembersihan selesai. Sistem siap beroperasi.');
+}
+
+/**
+ * Membersihkan & merotasi file log lokal (bot.log) serta temporary file agar tidak memenuhi disk
+ */
+function bersihkanLogLama() {
+    try {
+        const logFile = config.logFile;
+        if (fs.existsSync(logFile)) {
+            const stats = fs.statSync(logFile);
+            const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+            if (stats.size > MAX_SIZE_BYTES) {
+                const lines = fs.readFileSync(logFile, 'utf8').split('\n');
+                const lineKeep = lines.slice(-2000).join('\n');
+                fs.writeFileSync(logFile, lineKeep, 'utf8');
+                logger.success('SELF-HEALING', `File log ${path.basename(logFile)} dipangkas otomatis (menyimpan 2000 baris terakhir).`);
+            }
+        }
+    } catch (e) {
+        // Abaikan jika ada error pemangkasan log
+    }
 }
 
 /**
@@ -100,5 +125,6 @@ function registerErrorHandlers() {
 
 module.exports = {
     bersihkanSisaCrash,
+    bersihkanLogLama,
     registerErrorHandlers,
 };

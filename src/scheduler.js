@@ -6,6 +6,7 @@ const cron = require('node-cron');
 const config = require('./config');
 const logger = require('./utils/logger');
 const { prosesAbsenMassal } = require('./services/form-filler');
+const { bersihkanLogLama } = require('./utils/self-healing');
 
 /**
  * Inisialisasi cron job untuk absen otomatis harian
@@ -35,7 +36,16 @@ function initScheduler(client) {
         timezone: timezone,
     });
 
-    logger.success('SCHEDULER', `Cron job aktif: "${schedule}" (${timezone})`);
+    // ── Schedule Pembersihan Log & Temporary Harian Setiap Jam 00:00 WIB ──
+    cron.schedule('0 0 * * *', () => {
+        logger.system('⏰ Cron maintenance: Pembersihan log & file temporary harian...');
+        bersihkanLogLama();
+    }, {
+        scheduled: true,
+        timezone: timezone,
+    });
+
+    logger.success('SCHEDULER', `Cron job aktif: "${schedule}" (${timezone}) & Pembersihan harian (00:00)`);
 }
 
 module.exports = { initScheduler };
