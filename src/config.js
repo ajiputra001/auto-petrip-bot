@@ -66,7 +66,6 @@ const config = {
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--disable-quic',
-        '--no-zygote',
         '--no-first-run',
         '--disable-extensions',
         '--mute-audio',
@@ -74,7 +73,8 @@ const config = {
         '--disable-alsa',
         '--log-level=3',
         '--disable-webgl',
-        '--disable-software-rasterizer',
+        '--disable-accelerated-2d-canvas',
+        '--js-flags=--max-old-space-size=512',
     ],
 };
 

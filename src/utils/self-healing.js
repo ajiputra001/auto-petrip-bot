@@ -17,10 +17,10 @@ const logger = require('./logger');
 function bersihkanSisaCrash() {
     logger.system('Self-Healing: Memulai pembersihan sisa crash...');
 
-    // 1. Kill zombie Chrome processes
+    // 1. Kill zombie Chrome processes safely
     try {
-        execSync('pkill -f chrome || true', { stdio: 'ignore' });
-        execSync('pkill -f chromium || true', { stdio: 'ignore' });
+        execSync('pkill -9 -f "chrome --type=" || true', { stdio: 'ignore' });
+        execSync('pkill -9 -f "chromium --type=" || true', { stdio: 'ignore' });
         logger.debug('SELF-HEALING', 'Zombie Chrome/Chromium di-terminate.');
     } catch (e) {
         // Tidak ada proses yang perlu di-kill
