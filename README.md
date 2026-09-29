@@ -204,6 +204,23 @@ npm run dev
 | `/absen [Nama]` | Absen paksa driver tertentu |
 | `/absenmanual` | Absen semua driver |
 
+### 🛡️ Admin Override (khusus admin)
+| Perintah | Deskripsi |
+| --- | --- |
+| `/admin` | Menu admin |
+| `/listuser` | Daftar semua user & saldo |
+| `/aktifkan [email]` / `/nonaktifkan [email]` | Kelola status akun |
+| `/setadmin [email]` | Jadikan user sebagai admin |
+| `/adminreset [email] [pass]` | Reset password user |
+| `/adjust [email] [nominal]` | Tambah/potong saldo user |
+| `/orderlist` · `/adminstat` | Order top-up & statistik sistem |
+| `/setform [link]` · `/getform` · `/resetform` | Kelola link Google Form |
+| `/absenkan [Nama\|email]` | **Absen manual atas nama driver mana pun** |
+| `/absenkan [Nama] gratis` | Absen tanpa memotong saldo driver |
+| `/absenkansemua` | Absen semua driver tanpa potong saldo |
+
+> Gunakan `/absenkan` bila akun driver bermasalah/error: admin tetap bisa menjalankan absen atas nama driver tersebut. Tambahkan kata `gratis` agar saldo driver tidak terpotong saat proses penanganan error.
+
 ### 🆕 Akun & Saldo (Payment)
 | Perintah | Deskripsi |
 | --- | --- |

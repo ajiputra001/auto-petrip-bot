@@ -194,6 +194,8 @@ async function handleBantuan(msg) {
     menu += `│ 💰 \`/adjust [email] [nominal]\`\n`;
     menu += `│ 🔗 \`/setform [link]\`\n`;
     menu += `│ 📊 \`/adminstat\`\n`;
+    menu += `│ 🚚 \`/absenkan [Nama|email]\`\n`;
+    menu += `│ 👥 \`/absenkansemua\`\n`;
     menu += `└─────────────────────────\n\n`;
 
     menu += `🤖 System Autobot Powered By Ajiputra-tech\n`;

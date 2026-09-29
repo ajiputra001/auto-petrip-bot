@@ -22,9 +22,10 @@ const settings = require('../settings');
  * @param {Object} driver - Data driver
  * @param {Object|null} liveMsgObj - Live message untuk progress (null = tanpa WA update)
  * @param {string|null} senderWa - Nomor HP pengirim absen (untuk cek saldo)
+ * @param {{ skipCharge?: boolean }} options - skipCharge: lewati potong saldo (override admin)
  * @returns {Promise<Object>} Hasil { status, alasan, statusKerja, ringkasanAI }
  */
-async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = null) {
+async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = null, options = {}) {
     let browser = null;
     let tempScreenshotPath = null;
 
@@ -36,8 +37,8 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         // ══ STAGE 0: Validasi file & saldo ══
         await progress.update(0, 'Mengecek kesiapan file & saldo akun...');
 
-        // Validasi saldo jika mode berbayar aktif
-        if (config.pricePerAbsen > 0) {
+        // Validasi saldo jika mode berbayar aktif (admin bisa override via skipCharge)
+        if (config.pricePerAbsen > 0 && !options.skipCharge) {
             const chargeResult = await _chargeDriver(waClient, driver, liveMsgObj, senderWa);
             if (!chargeResult.success) {
                 await progress.finish(`🚫 *DIBATALKAN — SALDO KOSONG*\n_${chargeResult.error}_`);
@@ -366,8 +367,9 @@ async function _kirimAlertCookieExpired(waClient, driver) {
  * @param {Object} waClient - WhatsApp client
  * @param {string|null} targetNama - Nama driver spesifik (null = semua)
  * @param {Object|null} originalMsg - Pesan WA yang memicu (null = cron)
+ * @param {{ skipCharge?: boolean }} options - skipCharge: lewati potong saldo (override admin)
  */
-async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null) {
+async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null, options = {}) {
     let drivers = db.getAllDrivers();
 
     // Filter jika target spesifik
@@ -408,7 +410,7 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
         const driver = drivers[i];
         logger.system(`▶️ RUNNING WORKER ${i + 1}/${drivers.length}: ${driver.nama.toUpperCase()}`);
 
-        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj, senderWa);
+        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj, senderWa, options);
         rekapLaporan.push({
             nama: driver.nama,
             status: hasil.status,

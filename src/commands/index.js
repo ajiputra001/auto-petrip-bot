@@ -19,7 +19,7 @@ const {
 const {
     handleAdminMenu, handleListUser, handleAktifkan, handleNonaktifkan,
     handleSetAdmin, handleAdminReset, handleAdjust, handleOrderList, handleAdminStat,
-    handleSetForm, handleGetForm, handleResetForm,
+    handleSetForm, handleGetForm, handleResetForm, handleAbsenkan, handleAbsenkanSemua,
 } = require('./admin');
 
 /**
@@ -33,7 +33,7 @@ const KNOWN_COMMANDS = [
     '/status', '/absen', '/absenmanual',
     '/daftar', '/login', '/logout', '/saldo', '/topup', '/riwayat', '/linkakun', '/linkdriver',
     '/admin', '/listuser', '/aktifkan', '/nonaktifkan', '/setadmin', '/adminreset', '/adjust', '/orderlist', '/adminstat',
-    '/setform', '/getform', '/resetform'
+    '/setform', '/getform', '/resetform', '/absenkan', '/absenkansemua'
 ];
 
 /**
@@ -88,6 +88,8 @@ const ROUTES = [
     { match: (cmd) => cmd.startsWith('/setform ') || cmd === '/setform',    handler: handleSetForm },
     { match: (cmd) => cmd === '/getform',                                   handler: handleGetForm },
     { match: (cmd) => cmd === '/resetform',                                 handler: handleResetForm },
+    { match: (cmd) => cmd === '/absenkansemua',                             handler: handleAbsenkanSemua },
+    { match: (cmd) => cmd.startsWith('/absenkan ') || cmd === '/absenkan',  handler: handleAbsenkan },
 ];
 
 // ── Anti-Duplikat: Cache ID pesan yang sudah diproses ──

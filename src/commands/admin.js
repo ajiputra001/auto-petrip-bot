@@ -6,6 +6,7 @@ const auth = require('../auth');
 const wallet = require('../wallet');
 const payment = require('../payment');
 const settings = require('../settings');
+const db = require('../database');
 const { formatRupiah } = require('../utils/helpers');
 const { getUserIdByWa, getSenderWa } = require('./akun');
 
@@ -42,8 +43,75 @@ async function handleAdminMenu(msg) {
     teks += `🔗 \`/setform [link]\` — Ganti link Google Form\n`;
     teks += `👁️ \`/getform\` — Lihat link form aktif\n`;
     teks += `↩️ \`/resetform\` — Kembalikan ke link default (.env)\n`;
+    teks += `🚚 \`/absenkan [Nama|email]\` — Absen manual atas nama driver\n`;
+    teks += `🆓 \`/absenkan [Nama] gratis\` — Absen tanpa potong saldo\n`;
+    teks += `👥 \`/absenkansemua\` — Absen semua driver (tanpa potong saldo)\n`;
     teks += `━━━━━━━━━━━━━━━━━━━━━━`;
     return msg.reply(teks);
+}
+
+/**
+ * /absenkan [Nama driver | email akun] [gratis]
+ * Admin menjalankan absen atas nama driver mana pun (penanganan error/driver bermasalah).
+ */
+async function handleAbsenkan(msg, pesan, waClient) {
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*\nPerintah ini khusus admin.`);
+
+    const args = pesan.split(' ').filter(Boolean).slice(1);
+    if (!args.length) {
+        return msg.reply(
+            `Gunakan: \`/absenkan [Nama driver | email akun]\`\n\n` +
+            `Contoh:\n` +
+            `• \`/absenkan Agung\`\n` +
+            `• \`/absenkan budi@gmail.com\`\n` +
+            `• \`/absenkan Agung gratis\` — tanpa potong saldo`
+        );
+    }
+
+    // Kata terakhir "gratis" = override tanpa potong saldo
+    const skipCharge = args[args.length - 1].toLowerCase() === 'gratis';
+    const targetRaw = (skipCharge ? args.slice(0, -1) : args).join(' ').trim();
+
+    if (!targetRaw) return msg.reply(`❌ Nama driver / email tidak boleh kosong.`);
+
+    // Terima input berupa email akun → konversi ke nama driver terkait
+    let targetNama = targetRaw;
+    if (targetRaw.includes('@') && !targetRaw.endsWith('.us')) {
+        const user = auth.findUserByEmail(targetRaw);
+        if (!user) return msg.reply(`❌ Akun *${targetRaw}* tidak ditemukan.`);
+        if (!user.driverNama) {
+            return msg.reply(`❌ Akun *${user.nama}* belum tertaut ke driver mana pun.\nGunakan \`/linkdriver\` terlebih dahulu.`);
+        }
+        targetNama = user.driverNama;
+    }
+
+    const { driver } = db.findDriver(targetNama);
+    if (!driver) return msg.reply(`❌ Driver *${targetNama}* tidak terdaftar dalam database.`);
+
+    await msg.reply(
+        `🛡️ *ADMIN OVERRIDE ABSEN*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🚚 Driver : *${driver.nama}*\n` +
+        `💳 Saldo  : ${skipCharge ? '🆓 Tidak dipotong' : 'Dipotong normal'}\n\n` +
+        `⚡ Memulai proses...`
+    );
+
+    const { prosesAbsenMassal } = require('../services/form-filler');
+    await prosesAbsenMassal(waClient, driver.nama.toLowerCase(), msg, { skipCharge });
+}
+
+/**
+ * /absenkansemua — admin absenkan semua driver tanpa potong saldo
+ */
+async function handleAbsenkanSemua(msg, pesan, waClient) {
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*\nPerintah ini khusus admin.`);
+
+    await msg.reply(
+        `🛡️ *ADMIN OVERRIDE — ABSEN SEMUA DRIVER*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💳 Saldo: 🆓 Tidak dipotong\n\n⚡ Memulai proses...`
+    );
+
+    const { prosesAbsenMassal } = require('../services/form-filler');
+    await prosesAbsenMassal(waClient, null, msg, { skipCharge: true });
 }
 
 /**
@@ -257,5 +325,7 @@ module.exports = {
     handleSetForm,
     handleGetForm,
     handleResetForm,
+    handleAbsenkan,
+    handleAbsenkanSemua,
     isAdmin,
 };
