@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../database');
 const config = require('../config');
+const auth = require('../auth');
 
 /**
  * Hitung total ukuran & jumlah file dalam folder
@@ -77,8 +78,10 @@ async function handleStatus(msg) {
     teks += `   • SS Reaksi: ${screenshotsStats.count} file (${screenshotsStats.sizeMB} MB)\n`;
     teks += `   • Log File : ${logSize}\n\n`;
     teks += `🤖 *Bot Engine*\n`;
-    teks += `   • Version  : v1.0 Sovereign Smart Core\n`;
+    teks += `   • Version  : v2.0 Sovereign Payment Core\n`;
     teks += `   • Drivers  : ${totalDrivers} terdaftar\n`;
+    teks += `   • Users    : ${auth.listUsers().length} akun\n`;
+    teks += `   • Dashboard: ${config.webPort ? `http://0.0.0.0:${config.webPort}` : 'Nonaktif'}\n`;
     teks += `   • Engine   : 🟢 Running (Standby)\n`;
     teks += `\n━━━━━━━━━━━━━━━━━━━━━━━━`;
 

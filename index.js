@@ -6,6 +6,7 @@
 const logger = require('./src/utils/logger');
 const { bersihkanSisaCrash, registerErrorHandlers } = require('./src/utils/self-healing');
 const { createClient } = require('./src/client');
+const { startWebServer } = require('./src/server');
 
 // ── 1. Tampilkan banner ──
 logger.banner();
@@ -19,7 +20,13 @@ bersihkanSisaCrash();
 // ── 4. Inisialisasi database (otomatis saat import) ──
 require('./src/database');
 
-// ── 5. Buat & jalankan WhatsApp client ──
+// ── 5. Bootstrap admin (buat akun admin jika belum ada) ──
+require('./src/auth').bootstrapAdmin();
+
+// ── 6. Start Web Dashboard (login & top-up) ──
+startWebServer();
+
+// ── 7. Buat & jalankan WhatsApp client ──
 logger.system('Meluncurkan browser inti WhatsApp... Silakan tunggu...');
 const client = createClient();
 client.initialize();

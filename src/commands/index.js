@@ -6,12 +6,21 @@ const logger = require('../utils/logger');
 const { hitungKemiripan } = require('../utils/helpers');
 
 // Import semua command handler
-const { handleMenu } = require('./menu');
+const { handleMenu, handleBantuan, handleNumberInput, handlePendingInput } = require('./menu');
 const { handleTambahDriver, handleEditDriver, handleHapusDriver, handleListDriver } = require('./driver');
 const { handleSetLibur, handleSetMasuk, handleCekLibur } = require('./jadwal');
 const { handleUpdateFoto, handleUpdateCookie } = require('./media');
 const { handleStatus } = require('./status');
 const { handleAbsen, handleAbsenManual } = require('./absen');
+const {
+    handleDaftar, handleLogin, handleLogout, handleSaldo,
+    handleTopup, handleRiwayat, handleLinkAkun, handleLinkDriver,
+} = require('./akun');
+const {
+    handleAdminMenu, handleListUser, handleAktifkan, handleNonaktifkan,
+    handleSetAdmin, handleAdminReset, handleAdjust, handleOrderList, handleAdminStat,
+    handleSetForm, handleGetForm, handleResetForm,
+} = require('./admin');
 
 /**
  * Daftar semua perintah resmi untuk kecerdasan rekomendasi typo
@@ -21,7 +30,10 @@ const KNOWN_COMMANDS = [
     '/tambahdriver', '/editdriver', '/hapusdriver', '/listdriver',
     '/setlibur', '/setmasuk', '/ceklibur',
     '/updatefoto', '/updatecookie',
-    '/status', '/absen', '/absenmanual'
+    '/status', '/absen', '/absenmanual',
+    '/daftar', '/login', '/logout', '/saldo', '/topup', '/riwayat', '/linkakun', '/linkdriver',
+    '/admin', '/listuser', '/aktifkan', '/nonaktifkan', '/setadmin', '/adminreset', '/adjust', '/orderlist', '/adminstat',
+    '/setform', '/getform', '/resetform'
 ];
 
 /**
@@ -30,7 +42,8 @@ const KNOWN_COMMANDS = [
  */
 const ROUTES = [
     // Menu
-    { match: (cmd) => cmd === '/menu' || cmd === '/bantuan', handler: handleMenu },
+    { match: (cmd) => cmd === '/menu', handler: handleMenu },
+    { match: (cmd) => cmd === '/bantuan', handler: handleBantuan },
 
     // Driver CRUD
     { match: (cmd) => cmd.startsWith('/tambahdriver ') || cmd === '/tambahdriver', handler: handleTambahDriver },
@@ -51,6 +64,30 @@ const ROUTES = [
     { match: (cmd) => cmd === '/status',      handler: handleStatus },
     { match: (cmd) => cmd === '/absenmanual', handler: handleAbsenManual },
     { match: (cmd) => cmd.startsWith('/absen ') || cmd === '/absen', handler: handleAbsen },
+
+    // Akun & Pembayaran
+    { match: (cmd) => cmd.startsWith('/daftar ') || cmd === '/daftar', handler: handleDaftar },
+    { match: (cmd) => cmd.startsWith('/login ') || cmd === '/login',   handler: handleLogin },
+    { match: (cmd) => cmd === '/logout',                                handler: handleLogout },
+    { match: (cmd) => cmd === '/saldo',                                 handler: handleSaldo },
+    { match: (cmd) => cmd.startsWith('/topup ') || cmd === '/topup',    handler: handleTopup },
+    { match: (cmd) => cmd === '/riwayat',                               handler: handleRiwayat },
+    { match: (cmd) => cmd === '/linkakun',                              handler: handleLinkAkun },
+    { match: (cmd) => cmd.startsWith('/linkdriver ') || cmd === '/linkdriver', handler: handleLinkDriver },
+
+    // Admin
+    { match: (cmd) => cmd === '/admin',                                     handler: handleAdminMenu },
+    { match: (cmd) => cmd === '/listuser',                                  handler: handleListUser },
+    { match: (cmd) => cmd.startsWith('/aktifkan ') || cmd === '/aktifkan',  handler: handleAktifkan },
+    { match: (cmd) => cmd.startsWith('/nonaktifkan ') || cmd === '/nonaktifkan', handler: handleNonaktifkan },
+    { match: (cmd) => cmd.startsWith('/setadmin ') || cmd === '/setadmin',  handler: handleSetAdmin },
+    { match: (cmd) => cmd.startsWith('/adminreset ') || cmd === '/adminreset', handler: handleAdminReset },
+    { match: (cmd) => cmd.startsWith('/adjust ') || cmd === '/adjust',      handler: handleAdjust },
+    { match: (cmd) => cmd === '/orderlist',                                 handler: handleOrderList },
+    { match: (cmd) => cmd === '/adminstat',                                 handler: handleAdminStat },
+    { match: (cmd) => cmd.startsWith('/setform ') || cmd === '/setform',    handler: handleSetForm },
+    { match: (cmd) => cmd === '/getform',                                   handler: handleGetForm },
+    { match: (cmd) => cmd === '/resetform',                                 handler: handleResetForm },
 ];
 
 // ── Anti-Duplikat: Cache ID pesan yang sudah diproses ──
@@ -81,6 +118,13 @@ function registerCommandRouter(client) {
                 return;
             }
 
+            // ── Skip pesan yang dikirim BOT SENDIRI (fromMe) ──
+            // Penting: tanpa ini, prompt menu/balasan bot ikut diproses sebagai input
+            // sehingga alur input bertahap (topup/login/daftar) jadi kacau.
+            if (msg.fromMe) {
+                return;
+            }
+
             // ── Anti-Duplikat: Skip jika pesan sudah pernah diproses ──
             const msgId = msg.id && msg.id._serialized ? msg.id._serialized : null;
             if (msgId) {
@@ -89,13 +133,16 @@ function registerCommandRouter(client) {
                 cleanupCache();
             }
 
-            // ── Skip pesan lokasi / live location / tipe media selain text, image, document ──
+            // ── Skip pesan lokasi / live location / tipe media selain text, image, document, tombol ──
+            const interactiveTypes = ['buttons_response', 'list_response', 'interactive'];
+            const isInteractive = interactiveTypes.includes(msg.type) ||
+                msg.selectedButtonId || msg.selectedRowId;
             if (
                 msg.type === 'location' ||
                 msg.type === 'location_live' ||
                 msg.type === 'live_location' ||
                 msg.isLocation ||
-                (msg.type !== 'chat' && msg.type !== 'image' && msg.type !== 'document')
+                (!isInteractive && msg.type !== 'chat' && msg.type !== 'image' && msg.type !== 'document')
             ) {
                 return;
             }
@@ -103,81 +150,43 @@ function registerCommandRouter(client) {
             const pesan = msg.body ? msg.body.trim() : '';
             const pesanLower = pesan.toLowerCase();
 
+            // ── Deteksi klik tombol/list interaktif (masih didukung untuk kompatibilitas) ──
+            const clickedCmd = msg.selectedButtonId || msg.selectedRowId || null;
+            if (clickedCmd && !pesanLower.startsWith('/')) {
+                msg._fromButton = true;
+                return await _executeCommand(client, msg, clickedCmd, clickedCmd.toLowerCase());
+            }
+
             // Cek apakah pesan dimulai dengan /
-            if (!pesanLower.startsWith('/')) return;
+            if (!pesanLower.startsWith('/')) {
+                // ── Prioritas 1: Input bertahap (topup/login/daftar) ──
+                const pending = await handlePendingInput(client, msg, pesan);
+                if (pending.handled) {
+                    if (pending.command) {
+                        logger.info('COMMAND', `[INPUT] → ${pending.command} dari ${msg.from} (pesan: "${pesan}")`);
+                        return await _executeCommand(client, msg, pending.command, pending.command.toLowerCase());
+                    }
+                    return; // pertanyaan berikutnya sudah dikirim
+                }
+
+                // ── Prioritas 2: Navigasi menu bernomor (balas angka 0-9) ──
+                const nav = await handleNumberInput(client, msg, pesan);
+                if (nav.handled) {
+                    if (nav.command) {
+                        logger.info('COMMAND', `[MENU] → ${nav.command} dari ${msg.from}`);
+                        return await _executeCommand(client, msg, nav.command, nav.command.toLowerCase());
+                    }
+                    return; // submenu sudah dikirim
+                }
+                return;
+            }
 
             // Skip jika pesan diawali koordinat lokasi/angka (misal: /-6.1234,106.1234)
             if (/^\/[-+]?\d+[\.,]\d+/.test(pesanLower)) {
                 return;
             }
 
-            // Ambil chat ID asli (bukan JID Linked Device @lid)
-            const actualChatId = msg.id && msg.id.remote ? msg.id.remote : '';
-            if (!actualChatId) return;
-            msg.safeChatId = actualChatId;
-
-            // Amankan fungsi reply khusus untuk pesan yang dikirim diri sendiri / Linked Device
-            const fromStr = msg.from || '';
-            const isSelf = msg.fromMe || fromStr.includes('@lid') || actualChatId.includes('@lid');
-            const originalReply = msg.reply ? msg.reply.bind(msg) : null;
-            msg.reply = async (teks) => {
-                if (isSelf) {
-                    try {
-                        return await client.sendMessage(actualChatId, teks);
-                    } catch (e) {
-                        logger.error('ROUTER', `Bypass reply gagal: ${e.message}`);
-                    }
-                }
-                try {
-                    if (originalReply) {
-                        return await originalReply(teks);
-                    }
-                } catch (e) {
-                    logger.debug('ROUTER', `Original reply gagal: ${e.message}`);
-                }
-                try {
-                    return await client.sendMessage(actualChatId, teks);
-                } catch (e) {
-                    logger.error('ROUTER', `Semua metode reply gagal: ${e.message}`);
-                }
-            };
-
-            // Cari route yang cocok
-            let matched = false;
-            for (const route of ROUTES) {
-                if (route.match(pesanLower)) {
-                    matched = true;
-                    logger.info('COMMAND', `${pesanLower.split(' ')[0]} dari ${msg.from}`);
-
-                    // Selalu oper client untuk fungsi yang membutuhkan
-                    await route.handler(msg, pesan, client);
-                    return; // Stop setelah match pertama
-                }
-            }
-
-            // Jika tidak ada route yang cocok, berikan rekomendasi cerdas (Smart Typo Recommendation)
-            if (!matched) {
-                const cmdKeyword = pesanLower.split(' ')[0];
-                let bestMatch = null;
-                let minDistance = Infinity;
-
-                KNOWN_COMMANDS.forEach(k => {
-                    const dist = hitungKemiripan(cmdKeyword, k);
-                    if (dist <= 3 && dist < minDistance) {
-                        minDistance = dist;
-                        bestMatch = k;
-                    }
-                });
-
-                let balasanSaran = `❌ Perintah *${cmdKeyword}* tidak dikenali.`;
-                if (bestMatch) {
-                    const sisaArg = pesan.substring(cmdKeyword.length);
-                    balasanSaran += `\n\n💡 *Apakah maksud Anda*: \`${bestMatch}${sisaArg}\`?`;
-                }
-                balasanSaran += `\n\n📜 Ketik \`/menu\` untuk melihat seluruh daftar perintah resmi.`;
-
-                return await msg.reply(balasanSaran);
-            }
+            return await _executeCommand(client, msg, pesan, pesanLower);
         } catch (err) {
             logger.error('COMMAND', `Error saat memproses perintah: ${err.message}`);
             logger.debug('COMMAND', err.stack);
@@ -188,6 +197,92 @@ function registerCommandRouter(client) {
     });
 
     logger.success('ROUTER', `${ROUTES.length} perintah terdaftar & siap digunakan dengan Smart Assistance.`);
+}
+
+/**
+ * Eksekusi sebuah perintah (dari teks / atau klik tombol/list).
+ * @param {Object} client - WhatsApp client
+ * @param {Object} msg - Message object
+ * @param {string} pesan - Perintah asli (misal "/saldo" atau "/topup 50000")
+ * @param {string} pesanLower - Perintah lowercase
+ */
+async function _executeCommand(client, msg, pesan, pesanLower) {
+    // Ambil chat ID asli dalam bentuk STRING yang valid untuk sendMessage.
+    // Prioritas: msg.from (stabil di group/private), fallback ke remote serialized.
+    const actualChatId =
+        (typeof msg.from === 'string' && msg.from) ||
+        (msg.id && msg.id.remote && typeof msg.id.remote._serialized === 'string' && msg.id.remote._serialized) ||
+        (msg.id && typeof msg.id.remote === 'string' && msg.id.remote) ||
+        '';
+    if (!actualChatId) return;
+    msg.safeChatId = actualChatId;
+
+    // Amankan fungsi reply khusus untuk pesan yang dikirim diri sendiri / Linked Device
+    const fromStr = msg.from || '';
+    const isSelf = msg.fromMe || fromStr.includes('@lid') || actualChatId.includes('@lid');
+    const originalReply = msg.reply ? msg.reply.bind(msg) : null;
+    msg.reply = async (content, chatId, options) => {
+        // Signature asli whatsapp-web.js: reply(content, chatId?, options?)
+        // Pastikan options selalu object saat fallback ke sendMessage.
+        const sendOpts = options && typeof options === 'object' ? options : {};
+
+        if (isSelf) {
+            try {
+                return await client.sendMessage(actualChatId, content, sendOpts);
+            } catch (e) {
+                logger.error('ROUTER', `Bypass reply gagal: ${e.message}`);
+            }
+        }
+        try {
+            if (originalReply) {
+                return await originalReply(content, chatId, sendOpts);
+            }
+        } catch (e) {
+            logger.debug('ROUTER', `Original reply gagal: ${e.message}`);
+        }
+        try {
+            return await client.sendMessage(actualChatId, content, sendOpts);
+        } catch (e) {
+            logger.error('ROUTER', `Semua metode reply gagal: ${e.message}`);
+        }
+    };
+
+    // Cari route yang cocok
+    let matched = false;
+    for (const route of ROUTES) {
+        if (route.match(pesanLower)) {
+            matched = true;
+            logger.info('COMMAND', `${pesanLower.split(' ')[0]} dari ${msg.from}`);
+
+            // Selalu oper client untuk fungsi yang membutuhkan
+            await route.handler(msg, pesan, client);
+            return; // Stop setelah match pertama
+        }
+    }
+
+    // Jika tidak ada route yang cocok, berikan rekomendasi cerdas (Smart Typo Recommendation)
+    if (!matched) {
+        const cmdKeyword = pesanLower.split(' ')[0];
+        let bestMatch = null;
+        let minDistance = Infinity;
+
+        KNOWN_COMMANDS.forEach(k => {
+            const dist = hitungKemiripan(cmdKeyword, k);
+            if (dist <= 3 && dist < minDistance) {
+                minDistance = dist;
+                bestMatch = k;
+            }
+        });
+
+        let balasanSaran = `❌ Perintah *${cmdKeyword}* tidak dikenali.`;
+        if (bestMatch) {
+            const sisaArg = pesan.substring(cmdKeyword.length);
+            balasanSaran += `\n\n💡 *Apakah maksud Anda*: \`${bestMatch}${sisaArg}\`?`;
+        }
+        balasanSaran += `\n\n📜 Ketik \`/menu\` untuk melihat seluruh daftar perintah resmi.`;
+
+        return await msg.reply(balasanSaran);
+    }
 }
 
 module.exports = { registerCommandRouter };

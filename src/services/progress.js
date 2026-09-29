@@ -85,91 +85,139 @@ class ProgressTracker {
         template += `🖥️ System: Powered By Ajiputra-tech`;
 
         await this._editPesan(template);
-        await delay(2000); // Delay aman pelolosan rate-limit WA
+        await delay(1200); // Delay aman pelolosan rate-limit WA
     }
 
     /**
-     * Edit pesan WhatsApp secara robust dengan 3 tingkat fallback (termasuk direct browser injection)
-     * @param {string} teks 
+     * Edit pesan WhatsApp secara robust dengan 3 tingkat fallback.
+     * Jika semua edit gagal, kirim pesan baru agar tetap ada pergerakan.
+     * @param {string} teks
      */
     async _editPesan(teks) {
         if (!this.liveMsg) return;
 
         const serializedId = this.liveMsg.id ? this.liveMsg.id._serialized : null;
 
-        // 1. Coba edit langsung lewat object liveMsg
-        try {
-            const res = await this.liveMsg.edit(teks);
-            if (res) return;
-        } catch (e) { /* lanjut fallback */ }
-
-        // 2. Coba getMessageById lalu .edit()
-        if (serializedId) {
+        // ── Retry: jika pesan baru saja dikirim (belum siap diedit), tunggu sejenak ──
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            // 1. Coba edit langsung lewat object liveMsg
             try {
-                const freshMsg = await this.client.getMessageById(serializedId);
-                if (freshMsg) {
-                    const res = await freshMsg.edit(teks);
-                    if (res) return;
+                const res = await this.liveMsg.edit(teks);
+                if (res) {
+                    logger.debug('PROGRESS', `Edit OK (liveMsg): ${serializedId}`);
+                    return;
                 }
-            } catch (e) { /* lanjut fallback */ }
+            } catch (e) {
+                logger.debug('PROGRESS', `Edit via liveMsg gagal: ${e.message}`);
+            }
+
+            // 2. Coba getMessageById lalu .edit()
+            if (serializedId) {
+                try {
+                    const freshMsg = await this.client.getMessageById(serializedId);
+                    if (freshMsg) {
+                        const res = await freshMsg.edit(teks);
+                        if (res) {
+                            logger.debug('PROGRESS', `Edit OK (getMessageById): ${serializedId}`);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    logger.debug('PROGRESS', `Edit via getMessageById gagal: ${e.message}`);
+                }
+            }
+
+            // Jika ini percobaan terakhir, keluar dari loop retry
+            if (attempt >= 3) break;
+            await delay(1500); // tunggu pesan siap diedit
         }
 
         // 3. Fallback Khusus VPS: Direct Injection ke Browser WA Web Store
-        if (this.client && this.client.pupPage) {
-            try {
-                const msgKey = this.liveMsg.id ? (this.liveMsg.id.id || '') : '';
-                await this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
-                    try {
-                        const Msg = window.require('WAWebCollections').Msg;
-                        const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
-                        if (!models || models.length === 0) return false;
+        const injected = await this._editViaBrowser(serializedId, teks);
+        if (injected) {
+            logger.debug('PROGRESS', `Edit OK (browser injection): ${serializedId}`);
+            return;
+        }
 
-                        // Clean key extraction (hilangkan @c.us/@lid/prefix)
-                        const extractKey = (str) => {
-                            if (!str || typeof str !== 'string') return '';
-                            const parts = str.split('_');
-                            return parts.length >= 3 ? parts[2] : str;
-                        };
-
-                        const targetKey = rawKey || extractKey(msgId);
-
-                        let targetMsg = models.find(m => {
-                            if (!m || !m.id) return false;
-                            const sId = m.id._serialized || '';
-                            const mKey = m.id.id || extractKey(sId);
-                            if (targetKey && (sId.includes(targetKey) || mKey === targetKey)) return true;
-                            return false;
-                        });
-
-                        // Robust fallback: cari pesan outgoing terakhir yang memiliki teks loader bot
-                        if (!targetMsg) {
-                            targetMsg = [...models].reverse().find(m => {
-                                if (!m || !m.id) return false;
-                                const isFromMe = m.id.fromMe || m.fromMe;
-                                const body = m.body || m.caption || '';
-                                return isFromMe && (
-                                    body.includes('SYSTEM RUNNING') ||
-                                    body.includes('AJIPUTRA AUTOMATION ENGINE') ||
-                                    body.includes('LIVE TELEMETRY')
-                                );
-                            });
-                        }
-
-                        if (targetMsg) {
-                            const editAction = window.require('WAWebSendMessageEditAction');
-                            if (editAction && editAction.sendMessageEdit) {
-                                await editAction.sendMessageEdit(targetMsg, newContent, {});
-                                return true;
-                            }
-                        }
-                    } catch (err) {
-                        console.error('Direct edit error in browser:', err);
-                    }
-                    return false;
-                }, serializedId, msgKey, teks);
-            } catch (err) {
-                logger.debug('PROGRESS', `Direct edit browser gagal: ${err.message}`);
+        // 4. Fallback terakhir: kirim pesan baru, lalu PAKAI pesan baru itu sebagai liveMsg
+        //    (agar semua edit berikutnya konsisten ke SATU pesan, tidak dobel)
+        try {
+            const chatId = this.liveMsg.id ? (this.liveMsg.id.remote || this.liveMsg.safeChatId) : null;
+            if (chatId) {
+                const newMsg = await this.client.sendMessage(chatId, teks);
+                if (newMsg) {
+                    // Simpan safeChatId supaya fallback berikutnya tetap tahu tujuannya
+                    newMsg.safeChatId = chatId;
+                    this.liveMsg = newMsg; // ganti referensi → tidak ada pesan ganda
+                    logger.debug('PROGRESS', `Edit gagal → kirim pesan baru & ganti liveMsg ke ${chatId}`);
+                }
             }
+        } catch (e) {
+            logger.debug('PROGRESS', `Fallback kirim pesan baru gagal: ${e.message}`);
+        }
+    }
+
+    /**
+     * Direct injection edit ke browser WA Web Store.
+     * @returns {Promise<boolean>}
+     */
+    async _editViaBrowser(serializedId, teks) {
+        if (!this.client || !this.client.pupPage) return false;
+
+        try {
+            const msgKey = this.liveMsg.id ? (this.liveMsg.id.id || '') : '';
+            return await this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
+                try {
+                    const Msg = window.require('WAWebCollections').Msg;
+                    const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
+                    if (!models || models.length === 0) return false;
+
+                    // Clean key extraction (hilangkan @c.us/@lid/prefix)
+                    const extractKey = (str) => {
+                        if (!str || typeof str !== 'string') return '';
+                        const parts = str.split('_');
+                        return parts.length >= 3 ? parts[2] : str;
+                    };
+
+                    const targetKey = rawKey || extractKey(msgId);
+
+                    let targetMsg = models.find(m => {
+                        if (!m || !m.id) return false;
+                        const sId = m.id._serialized || '';
+                        const mKey = m.id.id || extractKey(sId);
+                        if (targetKey && (sId.includes(targetKey) || mKey === targetKey)) return true;
+                        return false;
+                    });
+
+                    // Robust fallback: cari pesan outgoing terakhir yang memiliki teks loader bot
+                    if (!targetMsg) {
+                        targetMsg = [...models].reverse().find(m => {
+                            if (!m || !m.id) return false;
+                            const isFromMe = m.id.fromMe || m.fromMe;
+                            const body = m.body || m.caption || '';
+                            return isFromMe && (
+                                body.includes('SYSTEM RUNNING') ||
+                                body.includes('AJIPUTRA AUTOMATION ENGINE') ||
+                                body.includes('LIVE TELEMETRY')
+                            );
+                        });
+                    }
+
+                    if (targetMsg) {
+                        const editAction = window.require('WAWebSendMessageEditAction');
+                        if (editAction && editAction.sendMessageEdit) {
+                            await editAction.sendMessageEdit(targetMsg, newContent, {});
+                            return true;
+                        }
+                    }
+                } catch (err) {
+                    console.error('Direct edit error in browser:', err);
+                }
+                return false;
+            }, serializedId, msgKey, teks);
+        } catch (err) {
+            logger.debug('PROGRESS', `Direct edit browser gagal: ${err.message}`);
+            return false;
         }
     }
 

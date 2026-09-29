@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Petrip — Dashboard Driver</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Login View -->
+        <div id="view-login" class="view active">
+            <div class="card auth-card">
+                <div class="logo">🤖<br><span>AUTO-PETRIP</span></div>
+                <p class="subtitle">Sovereign Telemetry Payment Engine</p>
+                <form id="login-form">
+                    <label>Email</label>
+                    <input type="email" id="login-email" placeholder="nama@email.com" required>
+                    <label>Password</label>
+                    <input type="password" id="login-password" placeholder="••••••••" required>
+                    <button type="submit" class="btn btn-primary">Masuk</button>
+                </form>
+                <p class="muted">Belum punya akun? <a href="#" id="show-register">Daftar</a></p>
+                <div id="login-error" class="error hidden"></div>
+            </div>
+        </div>
+
+        <!-- Register View -->
+        <div id="view-register" class="view">
+            <div class="card auth-card">
+                <div class="logo">🤖<br><span>AUTO-PETRIP</span></div>
+                <p class="subtitle">Daftar Akun Driver</p>
+                <form id="register-form">
+                    <label>Nama Lengkap</label>
+                    <input type="text" id="reg-nama" placeholder="Nama Anda" required>
+                    <label>Email</label>
+                    <input type="email" id="reg-email" placeholder="nama@email.com" required>
+                    <label>Password (min. 6 karakter)</label>
+                    <input type="password" id="reg-password" placeholder="••••••••" required>
+                    <button type="submit" class="btn btn-primary">Daftar</button>
+                </form>
+                <p class="muted">Sudah punya akun? <a href="#" id="show-login">Masuk</a></p>
+                <div id="reg-error" class="error hidden"></div>
+            </div>
+        </div>
+
+        <!-- Dashboard View -->
+        <div id="view-dashboard" class="view">
+            <header class="topbar">
+                <div class="brand">🤖 AUTO-PETRIP</div>
+                <div class="user-box">
+                    <span id="user-name"></span>
+                    <a href="/admin.html" class="btn btn-ghost" id="admin-link" style="display:none;">🛡️ Admin</a>
+                    <button id="logout-btn" class="btn btn-ghost">Keluar</button>
+                </div>
+            </header>
+
+            <main class="container">
+                <div class="balance-card">
+                    <span class="balance-label">Saldo Anda</span>
+                    <span class="balance-value" id="balance">Rp 0</span>
+                    <button class="btn btn-primary" id="refresh-balance">🔄 Refresh</button>
+                </div>
+
+                <div class="grid">
+                    <div class="card">
+                        <h2>💰 Top-up Saldo</h2>
+                        <p class="muted">Isi saldo untuk pengisian form otomatis. Pembayaran via QRIS.</p>
+                        <div class="nominal-grid" id="nominal-grid">
+                            <button class="nominal" data-amt="10000">Rp 10rb</button>
+                            <button class="nominal" data-amt="20000">Rp 20rb</button>
+                            <button class="nominal" data-amt="50000">Rp 50rb</button>
+                            <button class="nominal" data-amt="100000">Rp 100rb</button>
+                            <button class="nominal" data-amt="200000">Rp 200rb</button>
+                            <button class="nominal" data-amt="500000">Rp 500rb</button>
+                        </div>
+                        <form id="topup-form">
+                            <label>Nominal (Rp)</label>
+                            <input type="number" id="topup-amount" min="10000" step="1000" placeholder="Masukkan nominal" required>
+                            <button type="submit" class="btn btn-primary">Buat QRIS Pembayaran</button>
+                        </form>
+                        <div id="topup-error" class="error hidden"></div>
+                    </div>
+
+                    <div class="card">
+                        <h2>📜 Riwayat Transaksi</h2>
+                        <div id="transactions" class="tx-list">
+                            <p class="muted">Belum ada transaksi.</p>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Payment Modal -->
+        <div id="modal-pay" class="modal hidden">
+            <div class="modal-content">
+                <span class="close" id="close-pay">&times;</span>
+                <h2>Scan QRIS untuk Membayar</h2>
+                <p id="pay-amount" class="pay-amount"></p>
+                <p class="muted">QR berlaku ±15 menit. Setelah membayar, saldo otomatis masuk.</p>
+                <div class="qr-box">
+                    <img id="pay-qr" src="" alt="QRIS">
+                </div>
+                <a id="pay-link" href="#" target="_blank" class="btn btn-outline">Buka Halaman Pembayaran</a>
+                <p id="pay-status" class="muted">Menunggu pembayaran...</p>
+                <button class="btn btn-ghost" id="pay-done">Sudah Bayar / Cek Status</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

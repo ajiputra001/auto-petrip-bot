@@ -1,6 +1,6 @@
-# 🤖 AUTO-PETRIP BOT (SPX Form Automation Engine) v1.0
+# 🤖 AUTO-PETRIP BOT (SPX Form Automation Engine) v2.0
 
-Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX secara berkala dengan fitur telemetri real-time, ringkasan Autobot bertenaga Natural Language Generation, penanganan pemulihan mandiri (*self-healing*), dan penjadwalan terintegrasi.
+Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX secara berkala dengan fitur telemetri real-time, ringkasan Autobot bertenaga Natural Language Generation, penanganan pemulihan mandiri (*self-healing*), penjadwalan terintegrasi, serta **sistem akun & payment gateway (QRIS) untuk pengelolaan saldo driver**.
 
 ---
 
@@ -11,6 +11,9 @@ Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX 
 * **Self-Healing Engine**: Membersihkan sisa-sisa kegagalan browser/crash otomatis sebelum inisialisasi ulang agar penggunaan RAM VPS tetap aman.
 * **Auto-alert Cookie Expired**: Memberikan peringatan instan ke driver bersangkutan dan administrator ketika sesi Google Account terputus.
 * **Smart Robust Downloader & Typo Assistant**: Pengunduhan media otomatis yang mendukung pesan balasan (*reply*) serta pemetaan nama driver toleran salah ketik (*fuzzy match*).
+* **🆕 Sistem Akun (Email + Password)**: Driver punya akun sendiri dengan login aman (hash password scrypt + token HMAC).
+* **🆕 Payment Gateway QRIS (AutoGoPay)**: Top-up saldo via QRIS dinamis, auto-verifikasi pembayaran via webhook, dan pemotongan saldo otomatis per proses absen.
+* **🆕 Web Dashboard**: Halaman login, cek saldo, top-up, dan riwayat transaksi yang responsif (mobile & desktop).
 
 ---
 
@@ -67,7 +70,7 @@ Pastikan juga cache binary Chrome untuk Puppeteer terpasang:
 npx puppeteer browsers install chrome
 ```
 
-### 3. Konfigurasi Environment (`.env`)
+### 4. Konfigurasi Environment (`.env`)
 Salin file template `.env.example` ke `.env`:
 ```bash
 cp .env.example .env
@@ -79,15 +82,35 @@ nano .env
 ```
 Isi variabel yang ada sesuai dengan kebutuhan Anda:
 ```env
-WA_ADMIN=6285xxxxx2x5@c.us              # ID WhatsApp Administrator
-WA_GRUP=12xxxxxxx0557@g.us          # JID Grup WhatsApp Laporan
+# WhatsApp
+WA_ADMIN=6285xxxxx2x5@c.us            # ID WhatsApp Administrator
+WA_GRUP=12xxxxxxx0557@g.us            # JID Grup WhatsApp Laporan
 FORM_URL=https://docs.google.com/forms/... # Link Google Form SPX utama
-CRON_SCHEDULE=0 8 * * *                  # Jadwal absen otomatis (Setiap jam 08:00 Pagi)
-CRON_TIMEZONE=Asia/Jakarta               # Zona waktu cron scheduler
-```
-*Simpan perubahan dengan menekan `CTRL+O`, `Enter`, lalu keluar dengan `CTRL+X`.*
+CRON_SCHEDULE=0 8 * * *               # Jadwal absen otomatis (jam 08:00)
+CRON_TIMEZONE=Asia/Jakarta            # Zona waktu cron
 
-### 4. Mengonfigurasi Data Driver (`data/`)
+# Web Dashboard
+WEB_PORT=3000                         # Port dashboard (0 = nonaktif)
+PUBLIC_BASE_URL=http://IP-VPS:3000    # URL publik (untuk webhook harus HTTPS)
+JWT_SECRET=ganti-dengan-string-acak   # Secret token login
+
+# Payment Gateway AutoGoPay
+AUTOGOPAY_API_KEY=agp_API_KEY_KAMU    # API key dari https://autogopay.site
+TOPUP_MIN=10000                       # Minimal top-up
+TOPUP_MAX=10000000                    # Maksimal top-up
+TOPUP_FEE_PERCENT=0                   # Biaya admin (%) — 0 = gratis
+PRICE_PER_ABSEN=0                     # Harga per 1x pengisian form (0 = gratis)
+```
+*Simpan perubahan dengan `CTRL+O`, `Enter`, lalu `CTRL+X`.*
+
+### 5. Konfigurasi Payment Gateway (AutoGoPay)
+1. Daftar gratis di [AutoGoPay](https://autogopay.site/register).
+2. Dapatkan **API Key** dari dashboard AutoGoPay.
+3. Set **Callback URL** di dashboard ke: `https://IP-VPS-ANDA:3000/api/webhook/payment`.
+   > ⚠️ Untuk webhook production, wajib HTTPS (bisa pakai reverse proxy Nginx + Let's Encrypt, atau tunnel).
+4. Masukkan API Key ke `.env` pada `AUTOGOPAY_API_KEY`.
+
+### 6. Mengonfigurasi Data Driver (`data/`)
 Agar bot mengetahui daftar driver yang harus diabsenkan, buat/sesuaikan file konfigurasi data driver di folder `data/`:
 
 * **`data/database_driver.json`**
@@ -107,12 +130,11 @@ Agar bot mengetahui daftar driver yang harus diabsenkan, buat/sesuaikan file kon
   *Keterangan:*
   - `fileCookie`: Letakkan file JSON cookie driver di folder `cookies/cookie_randi.json`
   - `fileSS`: Letakkan screenshot reaksi driver di folder `screenshots/ss_randi.jpg`
+  - `noWa`: Nomor WhatsApp driver (dipakai untuk mengaitkan akun/saldo)
 
 * **`data/jadwal_libur.json`**
   ```json
-  {
-      "Randi": "-"
-  }
+  { "Randi": "-" }
   ```
   *(Isi `-` jika masuk penuh, atau isi nama hari seperti `Minggu` jika diliburkan).*
 
@@ -121,52 +143,103 @@ Agar bot mengetahui daftar driver yang harus diabsenkan, buat/sesuaikan file kon
 ## 🏃 Cara Menjalankan Bot
 
 ### Mode Pengembangan (Development)
-Untuk memantau log secara langsung di terminal:
 ```bash
 npm run dev
 ```
 
 ### Mode Produksi di Background (VPS Terus Aktif)
-Agar bot tetap berjalan di VPS meskipun sesi SSH Anda ditutup, gunakan manajer proses **PM2**:
-
-1. Pasang PM2 secara global:
+1. Pasang PM2:
    ```bash
    sudo npm install -g pm2
    ```
-2. Jalankan bot dengan PM2:
+2. Jalankan bot (pakai ecosystem agar anti-crash + kontrol memory):
    ```bash
-   pm2 start index.js --name "autobot"
+   npm run pm2:start:prod
    ```
-3. Setelan PM2 agar otomatis menyala saat VPS restart:
+3. Aktifkan log rotation PM2 agar log tidak bengkak di VPS:
+   ```bash
+   npm run pm2:logrotate:install
+   npm run pm2:logrotate:setup
+   ```
+4. Auto-restart saat reboot:
    ```bash
    pm2 startup
-   pm2 save
+   npm run pm2:save
    ```
-4. Perintah PM2 berguna lainnya:
-   * **Melihat status bot**: `pm2 status`
-   * **Melihat log real-time**: `pm2 logs autobot`
-   * **Merestart bot**: `pm2 restart autobot`
-   * **Menghentikan bot**: `pm2 stop autobot`
+5. Perintah PM2 berguna:
+   * `pm2 status` — status bot
+   * `pm2 logs auto-petrip-bot` — log real-time
+   * `pm2 restart auto-petrip-bot` — restart bot
+   * `pm2 stop auto-petrip-bot` — hentikan bot
+   * `npm run pm2:flush` — bersihkan log PM2 saat darurat
+
+> Rekomendasi production: gunakan konfigurasi default `ecosystem.config.js` (sudah berisi `max_memory_restart`, backoff restart, dan rotasi log PM2 lokal). Dengan ini bot jauh lebih stabil untuk jangka panjang di VPS.
 
 ---
 
 ## 💬 Perintah WhatsApp (Command List)
 
-Kirimkan perintah-perintah berikut ke nomor WhatsApp bot:
+### Manajemen Worker
+| Perintah | Deskripsi |
+| --- | --- |
+| `/menu` | Menu pusat bantuan |
+| `/status` | Status sistem & diagnostik |
+| `/tambahdriver [Nama]#[ID]#[Usia]#[Reaksi]` | Tambah driver |
+| `/editdriver [Nama]#[Kolom]#[Nilai]` | Edit data driver |
+| `/hapusdriver [Nama]` | Hapus driver |
+| `/listdriver` | Daftar driver & kesiapan data |
 
-| Perintah | Deskripsi | Contoh |
-| --- | --- | --- |
-| `/menu` | Menampilkan menu pusat bantuan & instruksi | `/menu` |
-| `/status` | Menampilkan status sistem, diagnostik VPS, & RAM | `/status` |
-| `/absen [Nama]` | Menjalankan absen paksa untuk driver tertentu | `/absen Randi` |
-| `/absenmanual` | Menjalankan absen untuk semua driver yang terdaftar | `/absenmanual` |
-| `/updatefoto [Nama]` | Memperbarui berkas screenshot reaksi harian *(lampirkan foto)* | `/updatefoto Randi` (+ gambar) |
-| `/updatecookie [Nama]` | Memperbarui file cookie session Google *(lampirkan JSON)* | `/updatecookie Randi` (+ file/teks JSON) |
-| `/libur [Nama] [Hari]` | Mengubah hari libur mingguan driver | `/libur Randi Minggu` |
-| `/masuk [Nama]` | Mengembalikan status driver kembali aktif bekerja penuh | `/masuk Randi` |
+### Media & Jadwal
+| Perintah | Deskripsi |
+| --- | --- |
+| `/updatefoto [Nama]` | Update screenshot reaksi (+ gambar) |
+| `/updatecookie [Nama]` | Update cookie session (+ JSON) |
+| `/setlibur [Nama] [Hari]` | Set hari libur driver |
+| `/setmasuk [Nama]` | Kembalikan driver aktif |
+| `/ceklibur` | Cek jadwal libur semua driver |
+
+### Control System
+| Perintah | Deskripsi |
+| --- | --- |
+| `/absen [Nama]` | Absen paksa driver tertentu |
+| `/absenmanual` | Absen semua driver |
+
+### 🆕 Akun & Saldo (Payment)
+| Perintah | Deskripsi |
+| --- | --- |
+| `/daftar [email] [password] [nama]` | Buat akun baru (auto login) |
+| `/login [email] [password]` | Login ke akun |
+| `/logout` | Logout dari akun |
+| `/saldo` | Cek saldo akun |
+| `/topup [nominal]` | Buat QRIS top-up saldo |
+| `/riwayat` | Riwayat transaksi |
+| `/linkakun` | Link dashboard web |
+
+---
+
+## 🔐 Alur Kerja Sistem Saldo (Payment)
+
+```
+Driver daftar akun (email+password)  →  Top-up saldo (QRIS AutoGoPay)
+        │                                        │
+        ▼                                        ▼
+   Akun tersimpan                       Webhook "transaction.received"
+   (scrypt + token HMAC)                → verifikasi signature HMAC-SHA256
+        │                                        │
+        ▼                                        ▼
+   Login via WA/Web                    Saldo otomatis bertambah
+                                            │
+                                            ▼
+   Driver jalankan /absen  →  Sistem cek saldo → cukup? → potong saldo → isi form
+                                            │
+                                            └─ tidak cukup → batalkan + notif topup
+```
+
+> **Catatan**: Cookie Google Form tetap digunakan untuk otentikasi pengisian form sebagai driver. Sistem akun (email+password) adalah lapisan baru untuk mengelola *akses bot* dan *saldo*, bukan menggantikan cookie Google.
 
 ---
 
 ## 📌 Catatan & Disclaimer
 * **Disclaimer:** Harap untuk mengecek email hasil laporan setiap hari. Tidak ada paksaan untuk menggunakan project autobot ini. Robot ini diciptakan hanya untuk meringankan pekerjaan para pengguna sehari-hari. **Ingat! Karena ini robot, bisa saja sewaktu-waktu membuat kesalahan/error.**
 * Pastikan file JSON cookie berformat standar Netscape/Chrome JSON Array dan berstatus aktif.
+* **Keamanan**: Ganti `JWT_SECRET` dengan string acak panjang. Jangan bagikan `AUTOGOPAY_API_KEY` ke siapapun.

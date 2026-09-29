@@ -89,6 +89,31 @@ function bersihkanLogLama() {
                 logger.success('SELF-HEALING', `File log ${path.basename(logFile)} dipangkas aman (64KB baris terbaru).`);
             }
         }
+
+        // Bersihkan log PM2 lokal (out/error) jika membesar > 10MB
+        const pm2Logs = [
+            path.join(config.rootDir, 'logs', 'pm2-out.log'),
+            path.join(config.rootDir, 'logs', 'pm2-error.log'),
+        ];
+
+        for (const pm2Log of pm2Logs) {
+            if (!fs.existsSync(pm2Log)) continue;
+
+            const stats = fs.statSync(pm2Log);
+            const PM2_MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+            if (stats.size <= PM2_MAX_SIZE_BYTES) continue;
+
+            const readSize = Math.min(stats.size, 64 * 1024);
+            const buffer = Buffer.alloc(readSize);
+            const fd = fs.openSync(pm2Log, 'r');
+            fs.readSync(fd, buffer, 0, readSize, stats.size - readSize);
+            fs.closeSync(fd);
+
+            const tailText = buffer.toString('utf8');
+            const lines = tailText.split('\n').slice(1).join('\n');
+            fs.writeFileSync(pm2Log, `--- PM2 LOG TRUNCATED (${new Date().toISOString()}) ---\n` + lines, 'utf8');
+            logger.success('SELF-HEALING', `File log ${path.basename(pm2Log)} dipangkas aman (64KB baris terbaru).`);
+        }
     } catch (e) {
         // Fallback aman: jika gagal, kosongkan file log
         try {

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Petrip — Panel Admin</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Login Admin -->
+        <div id="view-login" class="view active">
+            <div class="card auth-card">
+                <div class="logo">🛡️<br><span>PANEL ADMIN</span></div>
+                <p class="subtitle">Auto-Petrip Control Center</p>
+                <form id="login-form">
+                    <label>Email Admin</label>
+                    <input type="email" id="login-email" placeholder="admin@autopetrip.id" required>
+                    <label>Password</label>
+                    <input type="password" id="login-password" placeholder="••••••••" required>
+                    <button type="submit" class="btn btn-primary">Masuk</button>
+                </form>
+                <div id="login-error" class="error hidden"></div>
+            </div>
+        </div>
+
+        <!-- Panel Admin -->
+        <div id="view-panel" class="view">
+            <header class="topbar">
+                <div class="brand">🛡️ AUTO-PETRIP — PANEL ADMIN</div>
+                <div class="user-box">
+                    <span id="admin-name"></span>
+                    <button id="logout-btn" class="btn btn-ghost">Keluar</button>
+                </div>
+            </header>
+
+            <main class="container">
+                <!-- Pengaturan Link Form -->
+                <div class="card settings-card">
+                    <h2>🔗 Link Google Form</h2>
+                    <p class="muted">Link pengisian form yang digunakan bot. Bisa diubah tanpa restart.</p>
+                    <div class="form-url-box">
+                        <span id="current-form-url" class="form-url-text">Memuat...</span>
+                    </div>
+                    <form id="form-url-form" class="inline-form">
+                        <input type="url" id="form-url-input" placeholder="https://docs.google.com/forms/d/e/.../viewform" required>
+                        <button type="submit" class="btn btn-primary">Simpan Link</button>
+                    </form>
+                    <div id="form-url-error" class="error hidden"></div>
+                </div>
+
+                <!-- Statistik -->
+                <div class="stats-grid" id="stats-grid">
+                    <div class="stat-card"><span class="stat-value" id="st-users">0</span><span class="stat-label">Total User</span></div>
+                    <div class="stat-card"><span class="stat-value" id="st-active">0</span><span class="stat-label">User Aktif</span></div>
+                    <div class="stat-card"><span class="stat-value" id="st-balance">Rp 0</span><span class="stat-label">Total Saldo</span></div>
+                    <div class="stat-card"><span class="stat-value" id="st-topup">Rp 0</span><span class="stat-label">Total Top-up</span></div>
+                    <div class="stat-card"><span class="stat-value" id="st-pending">0</span><span class="stat-label">Order Pending</span></div>
+                    <div class="stat-card"><span class="stat-value" id="st-orders">0</span><span class="stat-label">Total Order</span></div>
+                </div>
+
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button class="tab active" data-tab="users">👥 Pengguna</button>
+                    <button class="tab" data-tab="transactions">💰 Transaksi</button>
+                    <button class="tab" data-tab="orders">🧾 Order Top-up</button>
+                </div>
+
+                <!-- Users -->
+                <div id="tab-users" class="tab-content active">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Nama</th><th>Email</th><th>Role</th><th>Status</th><th>Saldo</th><th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Transactions -->
+                <div id="tab-transactions" class="tab-content">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Waktu</th><th>User</th><th>Jenis</th><th>Deskripsi</th><th>Nominal</th></tr>
+                            </thead>
+                            <tbody id="transactions-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Orders -->
+                <div id="tab-orders" class="tab-content">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Waktu</th><th>User</th><th>Nominal</th><th>Status</th><th>Aksi</th></tr>
+                            </thead>
+                            <tbody id="orders-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal User Detail -->
+    <div id="modal-user" class="modal hidden">
+        <div class="modal-content">
+            <span class="close" id="close-user">&times;</span>
+            <h2>Kelola Pengguna</h2>
+            <div id="user-detail" class="user-detail"></div>
+            <div class="actions">
+                <button class="btn btn-outline" id="btn-adjust">➕ Tambah/Potong Saldo</button>
+                <button class="btn btn-outline" id="btn-toggle-active">🔁 Aktif/Nonaktif</button>
+                <button class="btn btn-outline" id="btn-toggle-role">👑 Ubah Role</button>
+                <button class="btn btn-outline" id="btn-reset-pw">🔑 Reset Password</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/admin.js"></script>
+</body>
+</html>

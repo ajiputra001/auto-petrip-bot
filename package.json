@@ -1,23 +1,41 @@
 {
-  "name": "ajiputra-bot-v1-auto",
-  "version": "1.0.0",
-  "description": "🚀 AJIPUTRA BOT — Sovereign Telemetry WhatsApp Automation Engine",
+  "name": "ajiputra-bot-v2-auto",
+  "version": "2.0.0",
+  "description": "🚀 AJIPUTRA BOT — Sovereign Telemetry WhatsApp Automation Engine + Payment Gateway",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch-path=src --watch-path=index.js index.js",
-    "check": "node --check index.js"
+    "check": "node --check index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:start:prod": "pm2 start ecosystem.config.js --env production",
+    "pm2:stop": "pm2 stop auto-petrip-bot",
+    "pm2:restart": "pm2 restart auto-petrip-bot",
+    "pm2:logs": "pm2 logs auto-petrip-bot",
+    "pm2:save": "pm2 save",
+    "pm2:logrotate:install": "pm2 install pm2-logrotate",
+    "pm2:logrotate:setup": "pm2 set pm2-logrotate:max_size 10M && pm2 set pm2-logrotate:retain 7 && pm2 set pm2-logrotate:compress true && pm2 set pm2-logrotate:workerInterval 30 && pm2 set pm2-logrotate:rotateInterval '0 0 * * *' && pm2 set pm2-logrotate:dateFormat YYYY-MM-DD_HH-mm-ss",
+    "pm2:flush": "pm2 flush"
   },
-  "keywords": ["whatsapp", "bot", "automation", "google-form"],
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "automation",
+    "google-form",
+    "payment",
+    "qris"
+  ],
   "author": "AJIPUTRA",
   "license": "MIT",
   "dependencies": {
-    "whatsapp-web.js": "^1.26.1-alpha.3",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3",
+    "pm2": "^7.0.4",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "node-cron": "^3.0.3",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
-    "dotenv": "^16.4.7",
-    "chalk": "^4.1.2"
+    "whatsapp-web.js": "^1.26.1-alpha.3"
   }
 }

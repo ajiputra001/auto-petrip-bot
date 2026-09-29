@@ -7,19 +7,24 @@ const path = require('path');
 const config = require('../config');
 const db = require('../database');
 const logger = require('../utils/logger');
-const { delay, generateNamaScreenshot, hapusFileAman } = require('../utils/helpers');
+const { delay, generateNamaScreenshot, hapusFileAman, formatRupiah } = require('../utils/helpers');
 const { launchBrowser, createPage, injectCookies, klikTombolTeks, ketikAman } = require('./browser');
 const { generasiRingkasanAI } = require('./ai-summary');
 const ProgressTracker = require('./progress');
+const wallet = require('../wallet');
+const auth = require('../auth');
+const { getSenderWa } = require('../commands/akun');
+const settings = require('../settings');
 
 /**
  * Isi Google Form untuk satu driver
  * @param {Object} waClient - WhatsApp client instance
  * @param {Object} driver - Data driver
  * @param {Object|null} liveMsgObj - Live message untuk progress (null = tanpa WA update)
+ * @param {string|null} senderWa - Nomor HP pengirim absen (untuk cek saldo)
  * @returns {Promise<Object>} Hasil { status, alasan, statusKerja, ringkasanAI }
  */
-async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
+async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = null) {
     let browser = null;
     let tempScreenshotPath = null;
 
@@ -28,8 +33,17 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
     const progress = new ProgressTracker(waClient, liveMsgObj, driver, isLibur);
 
     try {
-        // ══ STAGE 0: Validasi file ══
-        await progress.update(0, 'Mengecek kesiapan file database lokal...');
+        // ══ STAGE 0: Validasi file & saldo ══
+        await progress.update(0, 'Mengecek kesiapan file & saldo akun...');
+
+        // Validasi saldo jika mode berbayar aktif
+        if (config.pricePerAbsen > 0) {
+            const chargeResult = await _chargeDriver(waClient, driver, liveMsgObj, senderWa);
+            if (!chargeResult.success) {
+                await progress.finish(`🚫 *DIBATALKAN — SALDO KOSONG*\n_${chargeResult.error}_`);
+                return { status: 'GAGAL', alasan: chargeResult.error, statusKerja: '-', ringkasanAI, alasanSaldo: true };
+            }
+        }
 
         const cookiePath = db.getCookiePath(driver);
         const ssPath = db.getScreenshotPath(driver);
@@ -58,7 +72,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
 
         // ══ STAGE 2: Buka Google Form ══
         await progress.update(2, 'Menghubungi server Google Form utama...');
-        await page.goto(config.formUrl, {
+        await page.goto(settings.getFormUrl(), {
             waitUntil: 'networkidle2',
             timeout: config.formTimeout,
         });
@@ -232,6 +246,71 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null) {
 }
 
 /**
+ * Cek & potong saldo driver untuk proses absen.
+ * Konsep: SETIAP AKUN TERIKAT KE SATU NAMA DRIVER (field driverNama).
+ * Saldo dipotong dari akun yang driverNama-nya cocok dengan driver yang diabsen.
+ * @param {Object} waClient
+ * @param {Object} driver - Data driver yang diabsen
+ * @param {Object|null} liveMsgObj
+ * @param {string|null} senderWa - Nomor HP pengirim absen (untuk cron pakai noWa driver)
+ */
+async function _chargeDriver(waClient, driver, liveMsgObj, senderWa = null) {
+    const price = config.pricePerAbsen;
+
+    // Cari akun yang MEMILIKI driver ini (driverNama cocok / noWa cocok)
+    const allUsers = auth.listUsers();
+
+    // 1. Prioritas: akun yang driverNama-nya cocok dengan nama driver
+    let user = allUsers.find(u =>
+        u.driverNama && driver.nama.toLowerCase().includes(String(u.driverNama).toLowerCase())
+    );
+
+    // 2. Fallback: akun yang noWa-nya sama dengan noWa driver
+    if (!user) {
+        user = allUsers.find(u => u.noWa && driver.noWa && u.noWa === driver.noWa);
+    }
+
+    // 3. Fallback: akun pengirim absen (senderWa) — hanya jika akun tsb punya driverNama cocok
+    if (!user && senderWa) {
+        const senderUser = allUsers.find(u => u.noWa === senderWa);
+        if (senderUser && senderUser.driverNama &&
+            driver.nama.toLowerCase().includes(String(senderUser.driverNama).toLowerCase())) {
+            user = senderUser;
+        }
+    }
+
+    if (!user) {
+        return {
+            success: false,
+            error: `Driver *${driver.nama}* belum punya akun & saldo.\n\n` +
+                `Silakan daftar akun dengan nama driver:\n` +
+                `\`/daftar email password ${driver.nama}\`\n` +
+                `lalu \`/topup\` untuk isi saldo.`,
+        };
+    }
+
+    const userId = user.id;
+    const balance = wallet.getBalance(userId);
+    if (balance < price) {
+        return {
+            success: false,
+            error: `Saldo *${user.nama}* tidak cukup (${formatRupiah(balance)} < ${formatRupiah(price)}). Silakan \`/topup\`.`,
+        };
+    }
+
+    const result = wallet.chargeAbsen(userId, driver.nama);
+    if (!result.success) {
+        return { success: false, error: result.error };
+    }
+
+    if (liveMsgObj) {
+        // info ke live message bahwa saldo sudah dipotong
+        logger.info('WALLET', `Saldo ${user.nama} dipotong ${price} untuk absen ${driver.nama}`);
+    }
+    return { success: true };
+}
+
+/**
  * Kirim laporan sukses ke WA driver
  */
 async function _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI) {
@@ -305,12 +384,19 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
     const targetChatId = originalMsg ? originalMsg.safeChatId || originalMsg.from : config.waGrup;
     let liveMsgObj = null;
 
+    // Nomor HP pengirim absen (untuk cek saldo). null = cron (pakai noWa driver)
+    const senderWa = originalMsg ? getSenderWa(originalMsg) : null;
+
     if (originalMsg) {
         liveMsgObj = await waClient.sendMessage(
             targetChatId,
             `🤖 *[SYSTEM RUNNING]* Mempersiapkan instrumen browser server...`
         );
-        logger.info('PROGRESS', `liveMsgObj created - ChatJID: ${liveMsgObj?.id?.remote || 'N/A'}, ID: ${liveMsgObj?.id?._serialized || 'N/A'}, fromMe: ${liveMsgObj?.fromMe}`);
+        // Simpan safeChatId agar fallback kirim pesan baru di progress.js tahu tujuannya
+        if (liveMsgObj) {
+            liveMsgObj.safeChatId = targetChatId;
+        }
+        logger.info('PROGRESS', `liveMsgObj created - ChatJID: ${liveMsgObj?.id?.remote || 'N/A'}, ID: ${liveMsgObj?.id?._serialized || 'N/A'}, fromMe: ${liveMsgObj?.fromMe}, senderWa: ${senderWa || 'N/A'}`);
     }
 
     // Proses setiap driver
@@ -322,7 +408,7 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
         const driver = drivers[i];
         logger.system(`▶️ RUNNING WORKER ${i + 1}/${drivers.length}: ${driver.nama.toUpperCase()}`);
 
-        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj);
+        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj, senderWa);
         rekapLaporan.push({
             nama: driver.nama,
             status: hasil.status,

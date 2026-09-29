@@ -53,11 +53,37 @@ const config = {
     // ── File Database ──
     driverFile: path.join(ROOT_DIR, 'data', 'database_driver.json'),
     jadwalFile: path.join(ROOT_DIR, 'data', 'jadwal_libur.json'),
+    userFile: path.join(ROOT_DIR, 'data', 'database_user.json'),
+    walletFile: path.join(ROOT_DIR, 'data', 'database_wallet.json'),
     logFile: path.join(ROOT_DIR, 'data', 'bot.log'),
 
     // ── WhatsApp Auth ──
     waClientId: 'bot-ajiputra-v4',
     waAuthTimeout: 240000,
+
+    // ── Web Dashboard ──
+    webPort: parseInt(process.env.WEB_PORT) || 3000,
+    publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:3000',
+    jwtSecret: process.env.JWT_SECRET || 'auto-petrip-secret-ubah-ini',
+    webDir: path.join(ROOT_DIR, 'public'),
+
+    // ── Admin (bootstrap saat pertama kali) ──
+    adminEmail: process.env.ADMIN_EMAIL || 'admin@autopetrip.id',
+    adminPassword: process.env.ADMIN_PASSWORD || 'admin12345',
+    adminName: process.env.ADMIN_NAME || 'Agung (Admin)',
+
+    // ── Payment Gateway (AutoGoPay) ──
+    autogopayApiKey: process.env.AUTOGOPAY_API_KEY || '',
+    autogopayBaseUrl: process.env.AUTOGOPAY_BASE_URL || 'https://v1-gateway.autogopay.site',
+    topupMin: parseInt(process.env.TOPUP_MIN) || 10000,
+    topupMax: parseInt(process.env.TOPUP_MAX) || 10000000,
+    topupFeePercent: parseFloat(process.env.TOPUP_FEE_PERCENT) || 0,
+    pricePerAbsen: parseInt(process.env.PRICE_PER_ABSEN) || 500,
+
+    // ── Limit Top-up (Anti-Abuse / mencegah akun terblokir) ──
+    topupMaxPending: parseInt(process.env.TOPUP_MAX_PENDING) || 1,      // max order belum dibayar per user
+    topupMaxDaily: parseInt(process.env.TOPUP_MAX_DAILY) || 10,         // max topup berhasil per hari per user
+    topupCooldownMin: parseInt(process.env.TOPUP_COOLDOWN_MIN) || 5,    // jeda minimal antar pembuatan QRIS (menit)
 
     // ── Puppeteer Args ──
     puppeteerArgs: [

@@ -4,12 +4,43 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 /**
  * Delay/sleep async (ms)
  */
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Format angka menjadi Rupiah (IDR)
+ * @param {number} angka - Nominal
+ * @returns {string} Contoh: "Rp 50.000"
+ */
+function formatRupiah(angka) {
+    const n = Number(angka) || 0;
+    return 'Rp ' + n.toLocaleString('id-ID');
+}
+
+/**
+ * Generate ID acak dengan prefix
+ * @param {string} prefix - Prefix ID (misal "usr", "trx", "ord")
+ * @returns {string} ID unik
+ */
+function generateId(prefix = 'id') {
+    const ts = Date.now().toString(36);
+    const rand = crypto.randomBytes(4).toString('hex');
+    return `${prefix}_${ts}${rand}`;
+}
+
+/**
+ * Generate token acak (untuk top-up/payment)
+ * @param {number} bytes - Jumlah byte
+ * @returns {string} Token hex
+ */
+function generateToken(bytes = 16) {
+    return crypto.randomBytes(bytes).toString('hex');
 }
 
 /**
@@ -214,6 +245,9 @@ function hapusFileAman(filePath) {
 
 module.exports = {
     delay,
+    formatRupiah,
+    generateId,
+    generateToken,
     buatProgressBar,
     formatTanggalLengkap,
     getHariIni,

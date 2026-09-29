@@ -116,16 +116,50 @@ function createClient() {
         initScheduler(client);
 
         // ── Connection Watchdog / Health Check berkala (setiap 3 menit) ──
+        // Lebih tahan banting: retry + toleransi error transient (detached frame),
+        // hanya keluar setelah beberapa kegagalan berturut-turut.
+        let consecutiveFails = 0;
+
         setInterval(async () => {
-            try {
-                const state = await client.getState();
-                if (state !== 'CONNECTED') {
-                    logger.warn('WATCHDOG', `Koneksi WhatsApp terganggu (Status: ${state}). Merestart bot...`);
-                    process.exit(1);
+            let state = null;
+
+            // Coba hingga 3x dengan jeda singkat
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    state = await client.getState();
+                    break;
+                } catch (err) {
+                    const msg = (err && err.message) || String(err);
+                    // "detached Frame" adalah error transient puppeteer, BUKAN koneksi putus.
+                    // Bot sebenarnya masih berfungsi → abaikan, jangan hitung sebagai kegagalan.
+                    if (msg.includes('detached Frame') || msg.includes('Target closed') || msg.includes('Execution context was destroyed')) {
+                        logger.debug('WATCHDOG', `Error transient diabaikan (attempt ${attempt}/3): ${msg}`);
+                        await new Promise(r => setTimeout(r, 3000));
+                        continue; // coba lagi, tetap dalam hitungan attempt
+                    }
+                    if (attempt < 3) {
+                        logger.warn('WATCHDOG', `getState() gagal (attempt ${attempt}/3): ${msg}. Mencoba lagi...`);
+                        await new Promise(r => setTimeout(r, 3000));
+                    } else {
+                        throw err;
+                    }
                 }
-            } catch (err) {
-                logger.error('WATCHDOG', `Gagal mengecek status koneksi client (Browser frozen/closed): ${err.message}`);
-                process.exit(1);
+            }
+
+            if (state === 'CONNECTED') {
+                consecutiveFails = 0; // sehat
+            } else if (state === null) {
+                // Semua attempt gagal karena error transient → anggap masih hidup (jangan hitung fail)
+                logger.debug('WATCHDOG', `getState() gagal karena error transient, anggap masih terhubung.`);
+            } else {
+                consecutiveFails++;
+                logger.warn('WATCHDOG', `Koneksi WhatsApp terganggu (Status: ${state}). (${consecutiveFails}/3)`);
+                if (consecutiveFails >= 3) {
+                    logger.warn('WATCHDOG', 'Status koneksi belum stabil 3x berturut-turut. Menunggu siklus berikutnya tanpa restart paksa.');
+                    // Jangan restart paksa dari watchdog; biarkan event `disconnected`
+                    // yang memutuskan restart agar lebih aman dari false-positive.
+                    consecutiveFails = 0;
+                }
             }
         }, 180000);
     });
