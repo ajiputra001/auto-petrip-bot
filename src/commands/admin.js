@@ -100,6 +100,36 @@ async function handleAbsenkan(msg, pesan, waClient) {
 }
 
 /**
+ * /linkdriveruser [email] [Nama Driver] — admin menautkan akun user lain ke driver
+ */
+async function handleLinkDriverUser(msg, pesan) {
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*\nPerintah ini khusus admin.`);
+
+    const args = pesan.split(' ').filter(Boolean).slice(1);
+    if (args.length < 2) {
+        return msg.reply(`Gunakan: \`/linkdriveruser [email] [Nama Driver]\`\nContoh: \`/linkdriveruser budi@gmail.com Agung maulana\``);
+    }
+
+    const email = args[0];
+    const namaDriver = args.slice(1).join(' ');
+
+    const user = auth.findUserByEmail(email);
+    if (!user) return msg.reply(`❌ User *${email}* tidak ditemukan.`);
+
+    const { driver } = db.findDriver(namaDriver);
+    if (!driver) return msg.reply(`❌ Driver *${namaDriver}* tidak terdaftar.`);
+
+    const r = auth.updateUser(user.id, { driverNama: driver.nama });
+    if (!r.success) return msg.reply(`❌ ${r.error}`);
+
+    return msg.reply(
+        `✅ *AKUN DITAUTKAN*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `👤 Akun  : *${r.user.nama}* (${email})\n` +
+        `🚚 Driver: *${r.user.driverNama}*`
+    );
+}
+
+/**
  * /absenkansemua — admin absenkan semua driver tanpa potong saldo
  */
 async function handleAbsenkanSemua(msg, pesan, waClient) {
@@ -327,5 +357,6 @@ module.exports = {
     handleResetForm,
     handleAbsenkan,
     handleAbsenkanSemua,
+    handleLinkDriverUser,
     isAdmin,
 };

@@ -17,10 +17,12 @@ const {
     handleTopup, handleRiwayat, handleLinkAkun, handleLinkDriver,
 } = require('./akun');
 const {
-    handleAdminMenu, handleListUser, handleAktifkan, handleNonaktifkan,
+    handleListUser, handleAktifkan, handleNonaktifkan,
     handleSetAdmin, handleAdminReset, handleAdjust, handleOrderList, handleAdminStat,
     handleSetForm, handleGetForm, handleResetForm, handleAbsenkan, handleAbsenkanSemua,
+    handleLinkDriverUser,
 } = require('./admin');
+const { showAdminMenu, handleAdminInput, clearAdminState } = require('./admin-ui');
 
 /**
  * Daftar semua perintah resmi untuk kecerdasan rekomendasi typo
@@ -33,7 +35,7 @@ const KNOWN_COMMANDS = [
     '/status', '/absen', '/absenmanual',
     '/daftar', '/login', '/logout', '/saldo', '/topup', '/riwayat', '/linkakun', '/linkdriver',
     '/admin', '/listuser', '/aktifkan', '/nonaktifkan', '/setadmin', '/adminreset', '/adjust', '/orderlist', '/adminstat',
-    '/setform', '/getform', '/resetform', '/absenkan', '/absenkansemua'
+    '/setform', '/getform', '/resetform', '/absenkan', '/absenkansemua', '/linkdriveruser'
 ];
 
 /**
@@ -76,7 +78,7 @@ const ROUTES = [
     { match: (cmd) => cmd.startsWith('/linkdriver ') || cmd === '/linkdriver', handler: handleLinkDriver },
 
     // Admin
-    { match: (cmd) => cmd === '/admin',                                     handler: handleAdminMenu },
+    { match: (cmd) => cmd === '/admin', handler: (msg, pesan, client) => showAdminMenu(client, msg) },
     { match: (cmd) => cmd === '/listuser',                                  handler: handleListUser },
     { match: (cmd) => cmd.startsWith('/aktifkan ') || cmd === '/aktifkan',  handler: handleAktifkan },
     { match: (cmd) => cmd.startsWith('/nonaktifkan ') || cmd === '/nonaktifkan', handler: handleNonaktifkan },
@@ -90,6 +92,7 @@ const ROUTES = [
     { match: (cmd) => cmd === '/resetform',                                 handler: handleResetForm },
     { match: (cmd) => cmd === '/absenkansemua',                             handler: handleAbsenkanSemua },
     { match: (cmd) => cmd.startsWith('/absenkan ') || cmd === '/absenkan',  handler: handleAbsenkan },
+    { match: (cmd) => cmd.startsWith('/linkdriveruser ') || cmd === '/linkdriveruser', handler: handleLinkDriverUser },
 ];
 
 // ── Anti-Duplikat: Cache ID pesan yang sudah diproses ──
@@ -161,6 +164,17 @@ function registerCommandRouter(client) {
 
             // Cek apakah pesan dimulai dengan /
             if (!pesanLower.startsWith('/')) {
+                // ── Prioritas 0: Panel admin interaktif (navigasi angka & input) ──
+                msg.safeChatId = msg.safeChatId || msg.from;
+                const adminNav = await handleAdminInput(client, msg, pesan);
+                if (adminNav.handled) {
+                    if (adminNav.command) {
+                        logger.info('COMMAND', `[ADMIN-UI] → ${adminNav.command} dari ${msg.from}`);
+                        return await _executeCommand(client, msg, adminNav.command, adminNav.command.toLowerCase());
+                    }
+                    return;
+                }
+
                 // ── Prioritas 1: Input bertahap (topup/login/daftar) ──
                 const pending = await handlePendingInput(client, msg, pesan);
                 if (pending.handled) {
@@ -248,6 +262,11 @@ async function _executeCommand(client, msg, pesan, pesanLower) {
             logger.error('ROUTER', `Semua metode reply gagal: ${e.message}`);
         }
     };
+
+    // Perintah slash selain /admin mengakhiri sesi panel admin agar state tidak nyangkut
+    if (pesanLower !== '/admin') {
+        clearAdminState(msg);
+    }
 
     // Cari route yang cocok
     let matched = false;

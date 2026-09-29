@@ -205,9 +205,26 @@ npm run dev
 | `/absenmanual` | Absen semua driver |
 
 ### 🛡️ Admin Override (khusus admin)
+
+> 🎛️ **Cukup ketik `/admin` satu kali.** Setelah itu semua aksi dilakukan dengan membalas angka atau menekan tombol — tidak perlu menghafal satu pun perintah. Daftar user & driver ditampilkan bernomor, tinggal pilih.
+
+```
+🛡️ PANEL ADMIN
+ 1️⃣ 👥 Kelola User & Akun    → lihat/aktifkan/nonaktifkan/reset password/jadikan admin/tautkan driver
+ 2️⃣ 💰 Saldo & Transaksi    → lihat saldo, tambah/potong saldo, daftar order
+ 3️⃣ 🚀 Absen Override       → absenkan 1 driver (bayar/gratis) atau semua driver
+ 4️⃣ ⚙️ Form & Sistem        → lihat/ganti/reset link form, status server, jadwal libur
+ 5️⃣ 📊 Statistik Sistem
+ 0️⃣ ❌ Keluar
+```
+
+Setiap aksi berisiko (nonaktifkan akun, ubah saldo, jadikan admin, absen massal) selalu meminta **konfirmasi tombol ✅ Ya / ❌ Batal** terlebih dahulu.
+
+Perintah manual tetap tersedia bila diperlukan:
+
 | Perintah | Deskripsi |
 | --- | --- |
-| `/admin` | Menu admin |
+| `/admin` | Buka panel admin interaktif |
 | `/listuser` | Daftar semua user & saldo |
 | `/aktifkan [email]` / `/nonaktifkan [email]` | Kelola status akun |
 | `/setadmin [email]` | Jadikan user sebagai admin |
@@ -218,6 +235,9 @@ npm run dev
 | `/absenkan [Nama\|email]` | **Absen manual atas nama driver mana pun** |
 | `/absenkan [Nama] gratis` | Absen tanpa memotong saldo driver |
 | `/absenkansemua` | Absen semua driver tanpa potong saldo |
+| `/linkdriveruser [email] [Nama Driver]` | Tautkan akun user ke driver |
+
+> Catatan tombol: WhatsApp membatasi tombol interaktif (maks. 3 per pesan, dan dukungannya bergantung versi WhatsApp). Karena itu panel memakai **navigasi angka** sebagai mekanisme utama yang selalu jalan, dengan tombol asli dipakai pada layar konfirmasi. Bila tombol tidak muncul di perangkat Anda, sistem otomatis menampilkan versi teks bernomor — fungsinya identik.
 
 > Gunakan `/absenkan` bila akun driver bermasalah/error: admin tetap bisa menjalankan absen atas nama driver tersebut. Tambahkan kata `gratis` agar saldo driver tidak terpotong saat proses penanganan error.
 

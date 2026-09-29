@@ -187,7 +187,7 @@ async function handleBantuan(msg) {
     menu += `└─────────────────────────\n\n`;
 
     menu += `┌─🛡️ *ADMIN* _(khusus admin)_\n`;
-    menu += `│ 📊 \`/admin\`\n`;
+    menu += `│ 🎛️ \`/admin\` — _panel interaktif (tanpa ketik)_\n`;
     menu += `│ 👥 \`/listuser\`\n`;
     menu += `│ ✅ \`/aktifkan [email]\`\n`;
     menu += `│ 🚫 \`/nonaktifkan [email]\`\n`;
