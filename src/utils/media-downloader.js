@@ -129,19 +129,70 @@ async function downloadMediaRobust(msg, client = null) {
 
                 const mockQpl = createMockQpl();
 
-                const decryptedMedia = await WAWebDownloadManager.downloadManager.downloadAndMaybeDecrypt({
-                    directPath: msgModel.directPath,
-                    encFilehash: msgModel.encFilehash,
-                    filehash: msgModel.filehash,
-                    mediaKey: msgModel.mediaKey,
-                    mediaKeyTimestamp: msgModel.mediaKeyTimestamp,
-                    type: msgModel.type,
-                    signal: new AbortController().signal,
-                    downloadQpl: mockQpl,
-                });
+                const originalType = msgModel.type;
+                const originalMime = msgModel.mimetype || msgModel.mediaData?.mimetype || '';
+
+                const forceMediaMeta = (forcedType, forcedMime) => {
+                    if (forcedType) {
+                        msgModel.type = forcedType;
+                        if (msgModel.mediaData) msgModel.mediaData.type = forcedType;
+                    }
+                    if (forcedMime) {
+                        msgModel.mimetype = forcedMime;
+                        if (msgModel.mediaData) msgModel.mediaData.mimetype = forcedMime;
+                    }
+                };
+
+                const downloadWithCurrentMeta = async () => {
+                    return WAWebDownloadManager.downloadManager.downloadAndMaybeDecrypt({
+                        directPath: msgModel.directPath,
+                        encFilehash: msgModel.encFilehash,
+                        filehash: msgModel.filehash,
+                        mediaKey: msgModel.mediaKey,
+                        mediaKeyTimestamp: msgModel.mediaKeyTimestamp,
+                        type: msgModel.type,
+                        signal: new AbortController().signal,
+                        downloadQpl: mockQpl,
+                    });
+                };
+
+                let decryptedMedia = null;
+                let lastDownloadErr = null;
+
+                const attempts = [
+                    // Attempt #1: metadata asli
+                    { type: originalType, mime: originalMime },
+                    // Attempt #2: jika image tapi MIME octet-stream/empty, paksa jpeg
+                    ...(originalType === 'image' && (!originalMime || originalMime === 'application/octet-stream')
+                        ? [{ type: 'image', mime: 'image/jpeg' }]
+                        : []),
+                    // Attempt #3: fallback paksa PNG untuk beberapa perangkat tertentu
+                    ...(originalType === 'image' && (!originalMime || originalMime === 'application/octet-stream')
+                        ? [{ type: 'image', mime: 'image/png' }]
+                        : []),
+                    // Attempt #4: degrade ke document agar validasi MIME WAWeb tidak strict
+                    ...(originalType === 'image'
+                        ? [{ type: 'document', mime: 'application/octet-stream' }]
+                        : []),
+                ];
+
+                for (const meta of attempts) {
+                    try {
+                        forceMediaMeta(meta.type, meta.mime);
+                        decryptedMedia = await downloadWithCurrentMeta();
+                        if (decryptedMedia) break;
+                    } catch (e) {
+                        lastDownloadErr = e;
+                    }
+                }
+
+                // restore metadata awal agar tidak mengganggu state internal model
+                forceMediaMeta(originalType, originalMime);
 
                 if (!decryptedMedia) {
-                    return { error: 'Hasil dekripsi media dari WhatsApp bernilai kosong (null)' };
+                    return {
+                        error: lastDownloadErr?.message || 'Hasil dekripsi media dari WhatsApp bernilai kosong (null)',
+                    };
                 }
 
                 const base64Data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
