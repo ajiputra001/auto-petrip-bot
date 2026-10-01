@@ -149,8 +149,8 @@ document.getElementById('topup-form').addEventListener('submit', async e => {
     setError('topup-error', '');
     const amount = Number(document.getElementById('topup-amount').value);
 
-    if (!amount || amount < 10000) {
-        return setError('topup-error', 'Nominal minimal Rp 10.000.');
+    if (!amount || amount < 5000) {
+        return setError('topup-error', 'Nominal minimal Rp 5.000.');
     }
 
     const res = await api('/api/topup', {

@@ -75,7 +75,7 @@ const config = {
     // ── Payment Gateway (AutoGoPay) ──
     autogopayApiKey: process.env.AUTOGOPAY_API_KEY || '',
     autogopayBaseUrl: process.env.AUTOGOPAY_BASE_URL || 'https://v1-gateway.autogopay.site',
-    topupMin: parseInt(process.env.TOPUP_MIN) || 10000,
+    topupMin: parseInt(process.env.TOPUP_MIN) || 5000,
     topupMax: parseInt(process.env.TOPUP_MAX) || 10000000,
     topupFeePercent: parseFloat(process.env.TOPUP_FEE_PERCENT) || 0,
     pricePerAbsen: parseInt(process.env.PRICE_PER_ABSEN) || 500,

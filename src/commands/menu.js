@@ -219,9 +219,11 @@ async function _startTopupInput(msg) {
         `💳 *TOP-UP SALDO*\n\n` +
         `Berapa nominal yang ingin diisi?\n\n` +
         `💰 Pilihan cepat:\n` +
-        `- \`10000\` (Rp 10.000)\n` +
-        `- \`20000\` (Rp 20.000)\n` +
+        `- \`5000\` (Rp 5.000)\n` +
+        `- \`15000\` (Rp 15.000)\n` +
+        `- \`30000\` (Rp 30.000)\n` +
         `- \`50000\` (Rp 50.000)\n` +
+        `- \`75000\` (Rp 75.000)\n` +
         `- \`100000\` (Rp 100.000)\n\n` +
         `Atau ketik nominal sendiri (angka saja).\n` +
         `Balas \`0\` untuk batal.`;
