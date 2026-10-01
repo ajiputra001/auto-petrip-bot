@@ -247,7 +247,45 @@ class Database {
      */
     isLiburHariIni(namaDriver) {
         const jadwal = this.getJadwal();
-        const hariLibur = jadwal[namaDriver] || '-';
+        const normalizeNama = (v) => String(v || '')
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const normalizeHari = (v) => {
+            const raw = String(v || '')
+                .toLowerCase()
+                .normalize('NFKD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z]/g, '');
+
+            // Alias umum penulisan hari (antisipasi variasi input/manual edit JSON)
+            const map = {
+                senin: 'senin',
+                selasa: 'selasa',
+                rabu: 'rabu',
+                kamis: 'kamis',
+                jumat: 'jumat',
+                jumatberkah: 'jumat',
+                sabtu: 'sabtu',
+                minggu: 'minggu',
+                ahad: 'minggu',
+            };
+
+            return map[raw] || raw;
+        };
+
+        // 1) Cek langsung sesuai key asli
+        let hariLibur = jadwal[namaDriver];
+
+        // 2) Fallback: cari key nama yang match secara normalisasi
+        if (!hariLibur) {
+            const targetNama = normalizeNama(namaDriver);
+            const matchedKey = Object.keys(jadwal).find((k) => normalizeNama(k) === targetNama);
+            hariLibur = matchedKey ? jadwal[matchedKey] : '-';
+        }
+
+        hariLibur = hariLibur || '-';
         if (hariLibur === '-') return false;
 
         const hariIni = new Intl.DateTimeFormat('id-ID', {
@@ -255,7 +293,7 @@ class Database {
             timeZone: 'Asia/Jakarta',
         }).format(new Date());
 
-        return hariLibur.toLowerCase() === hariIni.toLowerCase();
+        return normalizeHari(hariLibur) === normalizeHari(hariIni);
     }
 
     /**
