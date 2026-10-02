@@ -14,12 +14,16 @@ class ProgressTracker {
      * @param {Object|null} liveMsgObj - Message object untuk di-edit (null = no WA output)
      * @param {Object} driver - Data driver yang sedang diproses
      * @param {boolean} isLibur - Status libur driver
+     * @param {string|null} chatId - Tujuan chat; dipakai bila liveMsgObj gagal dibuat
      */
-    constructor(waClient, liveMsgObj, driver, isLibur) {
+    constructor(waClient, liveMsgObj, driver, isLibur, chatId = null) {
         this.client = waClient;
         this.liveMsg = liveMsgObj;
         this.driver = driver;
         this.isLibur = isLibur;
+        // sendMessage() bisa mengembalikan undefined pada chat @lid walau pesan terkirim,
+        // jadi chatId disimpan agar progress tetap bisa dikirim/diedit.
+        this.chatId = chatId || (liveMsgObj && (liveMsgObj.safeChatId || (liveMsgObj.id && liveMsgObj.id.remote))) || null;
         this.startTime = Date.now();
     }
 
@@ -32,8 +36,8 @@ class ProgressTracker {
         // Selalu log ke console
         logger.info(this.driver.nama, `Stage ${stage}/4 — ${deskripsi}`);
 
-        // Skip WA update jika tidak ada live message
-        if (!this.liveMsg) return;
+        // Skip WA update hanya jika benar-benar tidak ada tujuan output
+        if (!this.liveMsg && !this.chatId) return;
 
         // Custom blocks progress bar
         const totalBlocks = 10;
@@ -117,10 +121,17 @@ class ProgressTracker {
      * @param {string} teks
      */
     async _editPesan(teks) {
-        if (!this.liveMsg) return;
+        if (!this.liveMsg && !this.chatId) return;
+
+        const EDIT_TIMEOUT = 8000; // hard cap per operasi edit di VPS
+
+        // Belum punya pesan yang bisa diedit → kirim pesan baru lalu adopsi sebagai liveMsg
+        if (!this.liveMsg) {
+            await this._kirimPesanBaru(teks, EDIT_TIMEOUT);
+            return;
+        }
 
         const serializedId = this.liveMsg.id ? this.liveMsg.id._serialized : null;
-        const EDIT_TIMEOUT = 8000; // hard cap per operasi edit di VPS
 
         // ── Retry: jika pesan baru saja dikirim (belum siap diedit), tunggu sejenak ──
         for (let attempt = 1; attempt <= 2; attempt++) {
@@ -167,24 +178,96 @@ class ProgressTracker {
 
         // 4. Fallback terakhir: kirim pesan baru, lalu PAKAI pesan baru itu sebagai liveMsg
         //    (agar semua edit berikutnya konsisten ke SATU pesan, tidak dobel)
+        await this._kirimPesanBaru(teks, EDIT_TIMEOUT);
+    }
+
+    /**
+     * Kirim pesan baru ke chat tujuan & adopsi sebagai liveMsg berikutnya.
+     * @param {string} teks
+     * @param {number} timeoutMs
+     */
+    async _kirimPesanBaru(teks, timeoutMs) {
+        const chatId = this.chatId ||
+            (this.liveMsg && (this.liveMsg.safeChatId || (this.liveMsg.id && this.liveMsg.id.remote)));
+        if (!chatId) return;
+
         try {
-            const chatId = this.liveMsg.safeChatId ||
-                (this.liveMsg.id ? this.liveMsg.id.remote : null);
-            if (chatId) {
-                const newMsg = await this._withTimeout(
-                    this.client.sendMessage(chatId, teks),
-                    EDIT_TIMEOUT,
-                    'sendMessage'
-                );
-                if (newMsg) {
-                    // Simpan safeChatId supaya fallback berikutnya tetap tahu tujuannya
-                    newMsg.safeChatId = chatId;
-                    this.liveMsg = newMsg; // ganti referensi → tidak ada pesan ganda
-                    logger.debug('PROGRESS', `Edit gagal → kirim pesan baru & ganti liveMsg ke ${chatId}`);
-                }
+            const newMsg = await this._withTimeout(
+                this.client.sendMessage(chatId, teks),
+                timeoutMs,
+                'sendMessage'
+            );
+            if (newMsg) {
+                // Simpan safeChatId supaya fallback berikutnya tetap tahu tujuannya
+                newMsg.safeChatId = chatId;
+                this.liveMsg = newMsg; // ganti referensi → tidak ada pesan ganda
+                logger.debug('PROGRESS', `Kirim pesan baru & adopsi sebagai liveMsg ke ${chatId}`);
+                return;
+            }
+
+            // sendMessage() pada chat @lid bisa mengembalikan undefined walau pesan terkirim.
+            // Ambil handle-nya dari store browser agar update berikutnya tetap mengedit 1 pesan.
+            const recovered = await this._ambilPesanTerakhirDariStore(chatId, timeoutMs);
+            if (recovered) {
+                recovered.safeChatId = chatId;
+                this.liveMsg = recovered;
+                logger.debug('PROGRESS', `Handle pesan dipulihkan dari store: ${recovered.id?._serialized}`);
+            } else {
+                // Tidak bisa dapat handle → hentikan output WA agar tidak spam pesan baru.
+                this.chatId = null;
+                logger.warn('PROGRESS', `Tidak bisa memperoleh handle pesan di ${chatId}. Progress WA dihentikan (log console tetap jalan).`);
             }
         } catch (e) {
             logger.debug('PROGRESS', `Fallback kirim pesan baru gagal: ${e.message}`);
+        }
+    }
+
+    /**
+     * Ambil pesan loader terakhir milik bot dari store WA Web lalu bungkus jadi Message.
+     * @param {string} chatId
+     * @param {number} timeoutMs
+     * @returns {Promise<Object|null>}
+     */
+    async _ambilPesanTerakhirDariStore(chatId, timeoutMs) {
+        if (!this.client || !this.client.pupPage) return null;
+
+        try {
+            const serialized = await this._withTimeout(
+                this.client.pupPage.evaluate((targetChat) => {
+                    try {
+                        const Msg = window.require('WAWebCollections').Msg;
+                        const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
+                        const found = [...models].reverse().find((m) => {
+                            if (!m || !m.id) return false;
+                            if (!(m.id.fromMe || m.fromMe)) return false;
+                            const remote = m.id.remote;
+                            const remoteStr = typeof remote === 'string'
+                                ? remote
+                                : (remote && remote._serialized) || '';
+                            if (targetChat && remoteStr && remoteStr !== targetChat) return false;
+                            const body = m.body || m.caption || '';
+                            return body.includes('SYSTEM RUNNING') ||
+                                body.includes('AJIPUTRA AUTOMATION ENGINE') ||
+                                body.includes('LIVE TELEMETRY');
+                        });
+                        return found && found.id ? found.id._serialized : null;
+                    } catch (err) {
+                        return null;
+                    }
+                }, chatId),
+                timeoutMs,
+                'pupPage.evaluate(findLastMsg)'
+            );
+
+            if (!serialized) return null;
+            return await this._withTimeout(
+                this.client.getMessageById(serialized),
+                timeoutMs,
+                'getMessageById(recover)'
+            );
+        } catch (e) {
+            logger.debug('PROGRESS', `Pemulihan handle pesan gagal: ${e.message}`);
+            return null;
         }
     }
 

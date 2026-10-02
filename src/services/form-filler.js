@@ -22,7 +22,7 @@ const settings = require('../settings');
  * @param {Object} driver - Data driver
  * @param {Object|null} liveMsgObj - Live message untuk progress (null = tanpa WA update)
  * @param {string|null} senderWa - Nomor HP pengirim absen (untuk cek saldo)
- * @param {{ skipCharge?: boolean }} options - skipCharge: lewati potong saldo (override admin)
+ * @param {{ skipCharge?: boolean, chatId?: string|null }} options - skipCharge: lewati potong saldo (override admin)
  * @returns {Promise<Object>} Hasil { status, alasan, statusKerja, ringkasanAI }
  */
 async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = null, options = {}) {
@@ -31,7 +31,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
     const isLibur = db.isLiburHariIni(driver.nama);
     const ringkasanAI = generasiRingkasanAI(driver, isLibur);
-    const progress = new ProgressTracker(waClient, liveMsgObj, driver, isLibur);
+    const progress = new ProgressTracker(waClient, liveMsgObj, driver, isLibur, options.chatId || null);
 
     try {
         // ══ STAGE 0: Validasi file & saldo ══
@@ -390,15 +390,19 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
     const senderWa = originalMsg ? getSenderWa(originalMsg) : null;
 
     if (originalMsg) {
-        liveMsgObj = await waClient.sendMessage(
-            targetChatId,
-            `🤖 *[SYSTEM RUNNING]* Mempersiapkan instrumen browser server...`
-        );
+        try {
+            liveMsgObj = await waClient.sendMessage(
+                targetChatId,
+                `🤖 *[SYSTEM RUNNING]* Mempersiapkan instrumen browser server...`
+            );
+        } catch (e) {
+            logger.warn('PROGRESS', `Gagal kirim pesan loader awal: ${e.message}`);
+        }
         // Simpan safeChatId agar fallback kirim pesan baru di progress.js tahu tujuannya
         if (liveMsgObj) {
             liveMsgObj.safeChatId = targetChatId;
         }
-        logger.info('PROGRESS', `liveMsgObj created - ChatJID: ${liveMsgObj?.id?.remote || 'N/A'}, ID: ${liveMsgObj?.id?._serialized || 'N/A'}, fromMe: ${liveMsgObj?.fromMe}, senderWa: ${senderWa || 'N/A'}`);
+        logger.info('PROGRESS', `liveMsgObj created - ChatJID: ${liveMsgObj?.id?.remote || 'N/A'}, ID: ${liveMsgObj?.id?._serialized || 'N/A'}, fromMe: ${liveMsgObj?.fromMe}, chatId: ${targetChatId}, senderWa: ${senderWa || 'N/A'}`);
     }
 
     // Proses setiap driver
@@ -410,7 +414,10 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
         const driver = drivers[i];
         logger.system(`▶️ RUNNING WORKER ${i + 1}/${drivers.length}: ${driver.nama.toUpperCase()}`);
 
-        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj, senderWa, options);
+        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj, senderWa, {
+            ...options,
+            chatId: originalMsg ? targetChatId : null,
+        });
         rekapLaporan.push({
             nama: driver.nama,
             status: hasil.status,
@@ -424,7 +431,7 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
     }
 
     // Kirim pesan akhir ke live msg
-    if (liveMsgObj) {
+    if (liveMsgObj && liveMsgObj.id && liveMsgObj.id._serialized) {
         try {
             const freshMsg = await waClient.getMessageById(liveMsgObj.id._serialized);
             await freshMsg.edit(`🚨 *ENGINE TERMINATED*\nTugas selesai. Menghimpun rekapitulasi data...`);
