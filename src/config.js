@@ -63,7 +63,7 @@ const config = {
 
     // ── Web Dashboard ──
     webPort: parseInt(process.env.WEB_PORT) || 3000,
-    publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:3000',
+    publicBaseUrl: process.env.PUBLIC_BASE_URL || 'https://autobot.ajiputra.my.id',
     jwtSecret: process.env.JWT_SECRET || 'auto-petrip-secret-ubah-ini',
     webDir: path.join(ROOT_DIR, 'public'),
 

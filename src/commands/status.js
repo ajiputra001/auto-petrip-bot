@@ -81,7 +81,7 @@ async function handleStatus(msg) {
     teks += `   • Version  : v2.0 Sovereign Payment Core\n`;
     teks += `   • Drivers  : ${totalDrivers} terdaftar\n`;
     teks += `   • Users    : ${auth.listUsers().length} akun\n`;
-    teks += `   • Dashboard: ${config.webPort ? `http://0.0.0.0:${config.webPort}` : 'Nonaktif'}\n`;
+    teks += `   • Dashboard: ${config.publicBaseUrl}\n`;
     teks += `   • Engine   : 🟢 Running (Standby)\n`;
     teks += `\n━━━━━━━━━━━━━━━━━━━━━━━━`;
 
