@@ -24,10 +24,9 @@ class ProgressTracker {
         // sendMessage() bisa mengembalikan undefined pada chat @lid walau pesan terkirim,
         // jadi chatId disimpan agar progress tetap bisa dikirim/diedit.
         this.chatId = chatId || (liveMsgObj && (liveMsgObj.safeChatId || (liveMsgObj.id && liveMsgObj.id.remote))) || null;
+        // ID pesan hasil pemulihan dari store, dipakai bila objek Message tak tersedia
+        this.storeMsgId = null;
         this.startTime = Date.now();
-        // Mode degradasi: edit tidak tersedia, kirim pesan baru hanya saat stage berganti.
-        this.modeMilestone = false;
-        this.stageTerkirim = -1;
     }
 
     /**
@@ -41,12 +40,6 @@ class ProgressTracker {
 
         // Skip WA update hanya jika benar-benar tidak ada tujuan output
         if (!this.liveMsg && !this.chatId) return;
-
-        // Saat edit tidak tersedia, batasi ke 1 pesan per stage agar tidak spam
-        if (this.modeMilestone) {
-            if (stage === this.stageTerkirim) return;
-            this.stageTerkirim = stage;
-        }
 
         // Custom blocks progress bar
         const totalBlocks = 10;
@@ -130,9 +123,18 @@ class ProgressTracker {
      * @param {string} teks
      */
     async _editPesan(teks) {
-        if (!this.liveMsg && !this.chatId) return;
+        if (!this.liveMsg && !this.storeMsgId && !this.chatId) return;
 
         const EDIT_TIMEOUT = 8000; // hard cap per operasi edit di VPS
+
+        // Punya ID dari store tapi tanpa objek Message → edit langsung di browser
+        if (!this.liveMsg && this.storeMsgId) {
+            if (await this._editViaBrowser(this.storeMsgId, teks)) {
+                logger.debug('PROGRESS', `Edit OK (store id): ${this.storeMsgId}`);
+                return;
+            }
+            this.storeMsgId = null;
+        }
 
         // Belum punya pesan yang bisa diedit → kirim pesan baru lalu adopsi sebagai liveMsg
         if (!this.liveMsg) {
@@ -215,33 +217,54 @@ class ProgressTracker {
             }
 
             // sendMessage() pada chat @lid bisa mengembalikan undefined walau pesan terkirim.
-            // Ambil handle-nya dari store browser agar update berikutnya tetap mengedit 1 pesan.
-            const recovered = await this._ambilPesanTerakhirDariStore(chatId, timeoutMs);
-            if (recovered) {
-                recovered.safeChatId = chatId;
-                this.liveMsg = recovered;
-                this.modeMilestone = false;
-                logger.debug('PROGRESS', `Handle pesan dipulihkan dari store: ${recovered.id?._serialized}`);
+            // Ambil ID-nya dari store browser agar update berikutnya tetap mengedit 1 pesan.
+            const recoveredId = await this._cariIdPesanDiStore(chatId, timeoutMs);
+            if (recoveredId) {
+                this.storeMsgId = recoveredId;
+                const recovered = await this._bungkusJadiMessage(recoveredId, timeoutMs);
+                if (recovered) {
+                    recovered.safeChatId = chatId;
+                    this.liveMsg = recovered;
+                }
+                logger.debug('PROGRESS', `ID pesan dipulihkan dari store: ${recoveredId}`);
                 return;
             }
 
-            // Tetap kirim progres, tapi hanya 1 pesan per stage agar tidak membanjiri chat.
-            if (!this.modeMilestone) {
-                this.modeMilestone = true;
-                logger.warn('PROGRESS', `Handle pesan tidak tersedia di ${chatId}. Beralih ke mode milestone (1 pesan per stage).`);
-            }
+            // Tanpa ID, edit tak mungkin → stop output WA agar chat tidak dibanjiri.
+            this.chatId = null;
+            logger.warn('PROGRESS', `Handle pesan tidak tersedia di ${chatId}. Progress WA dihentikan (log console tetap jalan).`);
         } catch (e) {
             logger.debug('PROGRESS', `Fallback kirim pesan baru gagal: ${e.message}`);
         }
     }
 
     /**
-     * Ambil pesan loader terakhir milik bot dari store WA Web lalu bungkus jadi Message.
-     * @param {string} chatId
+     * Bungkus serialized id menjadi objek Message (bila memungkinkan).
+     * @param {string} serialized
      * @param {number} timeoutMs
      * @returns {Promise<Object|null>}
      */
-    async _ambilPesanTerakhirDariStore(chatId, timeoutMs) {
+    async _bungkusJadiMessage(serialized, timeoutMs) {
+        try {
+            const msg = await this._withTimeout(
+                this.client.getMessageById(serialized),
+                timeoutMs,
+                'getMessageById(recover)'
+            );
+            return msg && typeof msg.edit === 'function' ? msg : null;
+        } catch (e) {
+            logger.debug('PROGRESS', `Bungkus Message gagal: ${e.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Cari serialized id pesan loader terakhir milik bot dari store WA Web.
+     * @param {string} chatId
+     * @param {number} timeoutMs
+     * @returns {Promise<string|null>}
+     */
+    async _cariIdPesanDiStore(chatId, timeoutMs) {
         if (!this.client || !this.client.pupPage) return null;
 
         try {
@@ -251,13 +274,14 @@ class ProgressTracker {
                         const Msg = window.require('WAWebCollections').Msg;
                         const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
 
-                        // Bandingkan hanya bagian nomor: chat @lid & @c.us merujuk user yang sama
-                        const userPart = (val) => {
-                            const str = typeof val === 'string'
-                                ? val
-                                : (val && val._serialized) || '';
-                            return str.split('@')[0];
+                        // WA Web kadang memakai `$1` sebagai ganti `_serialized`
+                        const idStr = (val) => {
+                            if (typeof val === 'string') return val;
+                            if (!val) return '';
+                            return val._serialized || val.$1 || '';
                         };
+                        // Chat @lid & @c.us bisa merujuk user sama → bandingkan bagian nomor saja
+                        const userPart = (val) => idStr(val).split('@')[0];
                         const targetUser = userPart(targetChat);
 
                         const found = [...models].reverse().find((m) => {
@@ -272,7 +296,7 @@ class ProgressTracker {
                                 body.includes('AJIPUTRA AUTOMATION ENGINE') ||
                                 body.includes('LIVE TELEMETRY');
                         });
-                        return found && found.id ? found.id._serialized : null;
+                        return found ? idStr(found.id) : null;
                     } catch (err) {
                         return null;
                     }
@@ -281,16 +305,9 @@ class ProgressTracker {
                 'pupPage.evaluate(findLastMsg)'
             );
 
-            if (!serialized) return null;
-            const msg = await this._withTimeout(
-                this.client.getMessageById(serialized),
-                timeoutMs,
-                'getMessageById(recover)'
-            );
-            // Hanya berguna bila pesan benar-benar bisa diedit
-            return msg && typeof msg.edit === 'function' ? msg : null;
+            return serialized || null;
         } catch (e) {
-            logger.debug('PROGRESS', `Pemulihan handle pesan gagal: ${e.message}`);
+            logger.debug('PROGRESS', `Pencarian id pesan gagal: ${e.message}`);
             return null;
         }
     }
@@ -303,7 +320,7 @@ class ProgressTracker {
         if (!this.client || !this.client.pupPage) return false;
 
         try {
-            const msgKey = this.liveMsg.id ? (this.liveMsg.id.id || '') : '';
+            const msgKey = (this.liveMsg && this.liveMsg.id && this.liveMsg.id.id) || '';
             return await this._withTimeout(this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
                 try {
                     const Msg = window.require('WAWebCollections').Msg;
@@ -321,7 +338,8 @@ class ProgressTracker {
 
                     let targetMsg = models.find(m => {
                         if (!m || !m.id) return false;
-                        const sId = m.id._serialized || '';
+                        // WA Web kadang memakai `$1` sebagai ganti `_serialized`
+                        const sId = m.id._serialized || m.id.$1 || '';
                         const mKey = m.id.id || extractKey(sId);
                         if (targetKey && (sId.includes(targetKey) || mKey === targetKey)) return true;
                         return false;
