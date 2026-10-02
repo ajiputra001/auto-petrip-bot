@@ -125,7 +125,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
             }
 
             await progress.update(4, '🚀 Form Sukses Terkirim!');
-            await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI);
+            await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, options.chatId);
             return { status: 'SUKSES', alasan: '-', statusKerja: 'Libur 🏖️', ringkasanAI };
         }
 
@@ -220,7 +220,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         }
 
         await progress.update(4, '🚀 Form Sukses Terkirim!');
-        await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI);
+        await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, options.chatId);
 
         return { status: 'SUKSES', alasan: '-', statusKerja: 'Masuk 🚚', ringkasanAI };
 
@@ -314,7 +314,7 @@ async function _chargeDriver(waClient, driver, liveMsgObj, senderWa = null) {
 /**
  * Kirim laporan sukses ke WA driver
  */
-async function _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI) {
+async function _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, chatId = null) {
     const waktu = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
     const disclaimer = `\n\n📌 *Disclaimer :*\nHarap Untuk Mengecek Email Dari Hasil  Laporan Setiap Hari.
 Dan Tidak ada paksaan untuk menggunakan project autobot ini .
@@ -334,11 +334,25 @@ INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
     pesan += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
     pesan += `🤖 _System Powered by Ajiputra-tech v1.0_${disclaimer}`;
 
-    try {
-        await waClient.sendMessage(config.waGrup, pesan);
-    } catch (e) {
-        logger.warn(driver.nama, `Gagal kirim laporan ke Grup WA: ${e.message}`);
+    for (const tujuan of _tujuanLaporan(chatId)) {
+        try {
+            await waClient.sendMessage(tujuan, pesan);
+        } catch (e) {
+            logger.warn(driver.nama, `Gagal kirim laporan ke ${tujuan}: ${e.message}`);
+        }
     }
+}
+
+/**
+ * Daftar tujuan laporan: grup laporan + chat pemicu (bila berbeda).
+ * @param {string|null} chatId
+ * @returns {string[]}
+ */
+function _tujuanLaporan(chatId) {
+    const tujuan = [];
+    if (config.waGrup) tujuan.push(config.waGrup);
+    if (chatId && chatId !== config.waGrup) tujuan.push(chatId);
+    return tujuan;
 }
 
 /**
@@ -466,14 +480,19 @@ Dan Tidak ada paksaan untuk menggunakan project autobot ini .
 Robot ini di ciptakan hanya untuk meringankan kerjaan para pengguna sehari-hari .
 INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
 
-    // Kirim ke grup
-    try {
-        await waClient.sendMessage(config.waGrup, rekap);
-    } catch (e) {
-        logger.warn('REKAP', `Gagal kirim ke grup, coba reply ke pengirim...`);
-        if (originalMsg) {
-            try { await originalMsg.reply(rekap); } catch (err) { /* abaikan */ }
+    // Kirim ke grup laporan & chat pemicu
+    let rekapTerkirim = false;
+    for (const tujuan of _tujuanLaporan(originalMsg ? targetChatId : null)) {
+        try {
+            await waClient.sendMessage(tujuan, rekap);
+            rekapTerkirim = true;
+        } catch (e) {
+            logger.warn('REKAP', `Gagal kirim rekap ke ${tujuan}: ${e.message}`);
         }
+    }
+
+    if (!rekapTerkirim && originalMsg) {
+        try { await originalMsg.reply(rekap); } catch (err) { /* abaikan */ }
     }
 }
 

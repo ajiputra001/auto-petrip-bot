@@ -25,6 +25,9 @@ class ProgressTracker {
         // jadi chatId disimpan agar progress tetap bisa dikirim/diedit.
         this.chatId = chatId || (liveMsgObj && (liveMsgObj.safeChatId || (liveMsgObj.id && liveMsgObj.id.remote))) || null;
         this.startTime = Date.now();
+        // Mode degradasi: edit tidak tersedia, kirim pesan baru hanya saat stage berganti.
+        this.modeMilestone = false;
+        this.stageTerkirim = -1;
     }
 
     /**
@@ -38,6 +41,12 @@ class ProgressTracker {
 
         // Skip WA update hanya jika benar-benar tidak ada tujuan output
         if (!this.liveMsg && !this.chatId) return;
+
+        // Saat edit tidak tersedia, batasi ke 1 pesan per stage agar tidak spam
+        if (this.modeMilestone) {
+            if (stage === this.stageTerkirim) return;
+            this.stageTerkirim = stage;
+        }
 
         // Custom blocks progress bar
         const totalBlocks = 10;
@@ -211,11 +220,15 @@ class ProgressTracker {
             if (recovered) {
                 recovered.safeChatId = chatId;
                 this.liveMsg = recovered;
+                this.modeMilestone = false;
                 logger.debug('PROGRESS', `Handle pesan dipulihkan dari store: ${recovered.id?._serialized}`);
-            } else {
-                // Tidak bisa dapat handle → hentikan output WA agar tidak spam pesan baru.
-                this.chatId = null;
-                logger.warn('PROGRESS', `Tidak bisa memperoleh handle pesan di ${chatId}. Progress WA dihentikan (log console tetap jalan).`);
+                return;
+            }
+
+            // Tetap kirim progres, tapi hanya 1 pesan per stage agar tidak membanjiri chat.
+            if (!this.modeMilestone) {
+                this.modeMilestone = true;
+                logger.warn('PROGRESS', `Handle pesan tidak tersedia di ${chatId}. Beralih ke mode milestone (1 pesan per stage).`);
             }
         } catch (e) {
             logger.debug('PROGRESS', `Fallback kirim pesan baru gagal: ${e.message}`);
@@ -237,14 +250,23 @@ class ProgressTracker {
                     try {
                         const Msg = window.require('WAWebCollections').Msg;
                         const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
+
+                        // Bandingkan hanya bagian nomor: chat @lid & @c.us merujuk user yang sama
+                        const userPart = (val) => {
+                            const str = typeof val === 'string'
+                                ? val
+                                : (val && val._serialized) || '';
+                            return str.split('@')[0];
+                        };
+                        const targetUser = userPart(targetChat);
+
                         const found = [...models].reverse().find((m) => {
                             if (!m || !m.id) return false;
                             if (!(m.id.fromMe || m.fromMe)) return false;
-                            const remote = m.id.remote;
-                            const remoteStr = typeof remote === 'string'
-                                ? remote
-                                : (remote && remote._serialized) || '';
-                            if (targetChat && remoteStr && remoteStr !== targetChat) return false;
+                            if (targetUser) {
+                                const remoteUser = userPart(m.id.remote);
+                                if (remoteUser && remoteUser !== targetUser) return false;
+                            }
                             const body = m.body || m.caption || '';
                             return body.includes('SYSTEM RUNNING') ||
                                 body.includes('AJIPUTRA AUTOMATION ENGINE') ||
@@ -260,11 +282,13 @@ class ProgressTracker {
             );
 
             if (!serialized) return null;
-            return await this._withTimeout(
+            const msg = await this._withTimeout(
                 this.client.getMessageById(serialized),
                 timeoutMs,
                 'getMessageById(recover)'
             );
+            // Hanya berguna bila pesan benar-benar bisa diedit
+            return msg && typeof msg.edit === 'function' ? msg : null;
         } catch (e) {
             logger.debug('PROGRESS', `Pemulihan handle pesan gagal: ${e.message}`);
             return null;
