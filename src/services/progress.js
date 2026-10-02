@@ -89,20 +89,44 @@ class ProgressTracker {
     }
 
     /**
+     * Jalankan promise dengan hard timeout.
+     * Di VPS, `pupPage.evaluate()` bisa HANG (tidak throw) saat frame WA Web
+     * terlepas/detached — tanpa timeout, `await` tidak akan pernah selesai dan
+     * seluruh alur progress (juga absen) membeku. Timeout memastikan selalu ada
+     * jalan keluar agar fallback berikutnya tetap berjalan.
+     * @param {Promise} promise
+     * @param {number} ms
+     * @param {string} label
+     * @returns {Promise<*>}
+     */
+    async _withTimeout(promise, ms, label = 'operasi') {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Timeout ${ms}ms: ${label}`)), ms);
+        });
+        try {
+            return await Promise.race([promise, timeout]);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
      * Edit pesan WhatsApp secara robust dengan 3 tingkat fallback.
-     * Jika semua edit gagal, kirim pesan baru agar tetap ada pergerakan.
+     * Setiap operasi dibungkus timeout agar tidak pernah hang di VPS.
      * @param {string} teks
      */
     async _editPesan(teks) {
         if (!this.liveMsg) return;
 
         const serializedId = this.liveMsg.id ? this.liveMsg.id._serialized : null;
+        const EDIT_TIMEOUT = 8000; // hard cap per operasi edit di VPS
 
         // ── Retry: jika pesan baru saja dikirim (belum siap diedit), tunggu sejenak ──
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
             // 1. Coba edit langsung lewat object liveMsg
             try {
-                const res = await this.liveMsg.edit(teks);
+                const res = await this._withTimeout(this.liveMsg.edit(teks), EDIT_TIMEOUT, 'liveMsg.edit');
                 if (res) {
                     logger.debug('PROGRESS', `Edit OK (liveMsg): ${serializedId}`);
                     return;
@@ -114,9 +138,13 @@ class ProgressTracker {
             // 2. Coba getMessageById lalu .edit()
             if (serializedId) {
                 try {
-                    const freshMsg = await this.client.getMessageById(serializedId);
+                    const freshMsg = await this._withTimeout(
+                        this.client.getMessageById(serializedId),
+                        EDIT_TIMEOUT,
+                        'getMessageById'
+                    );
                     if (freshMsg) {
-                        const res = await freshMsg.edit(teks);
+                        const res = await this._withTimeout(freshMsg.edit(teks), EDIT_TIMEOUT, 'freshMsg.edit');
                         if (res) {
                             logger.debug('PROGRESS', `Edit OK (getMessageById): ${serializedId}`);
                             return;
@@ -127,9 +155,7 @@ class ProgressTracker {
                 }
             }
 
-            // Jika ini percobaan terakhir, keluar dari loop retry
-            if (attempt >= 3) break;
-            await delay(1500); // tunggu pesan siap diedit
+            if (attempt < 2) await delay(800); // tunggu pesan siap diedit
         }
 
         // 3. Fallback Khusus VPS: Direct Injection ke Browser WA Web Store
@@ -142,9 +168,14 @@ class ProgressTracker {
         // 4. Fallback terakhir: kirim pesan baru, lalu PAKAI pesan baru itu sebagai liveMsg
         //    (agar semua edit berikutnya konsisten ke SATU pesan, tidak dobel)
         try {
-            const chatId = this.liveMsg.id ? (this.liveMsg.id.remote || this.liveMsg.safeChatId) : null;
+            const chatId = this.liveMsg.safeChatId ||
+                (this.liveMsg.id ? this.liveMsg.id.remote : null);
             if (chatId) {
-                const newMsg = await this.client.sendMessage(chatId, teks);
+                const newMsg = await this._withTimeout(
+                    this.client.sendMessage(chatId, teks),
+                    EDIT_TIMEOUT,
+                    'sendMessage'
+                );
                 if (newMsg) {
                     // Simpan safeChatId supaya fallback berikutnya tetap tahu tujuannya
                     newMsg.safeChatId = chatId;
@@ -166,7 +197,7 @@ class ProgressTracker {
 
         try {
             const msgKey = this.liveMsg.id ? (this.liveMsg.id.id || '') : '';
-            return await this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
+            return await this._withTimeout(this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
                 try {
                     const Msg = window.require('WAWebCollections').Msg;
                     const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
@@ -214,7 +245,7 @@ class ProgressTracker {
                     console.error('Direct edit error in browser:', err);
                 }
                 return false;
-            }, serializedId, msgKey, teks);
+            }, serializedId, msgKey, teks), 8000, 'pupPage.evaluate(edit)');
         } catch (err) {
             logger.debug('PROGRESS', `Direct edit browser gagal: ${err.message}`);
             return false;
