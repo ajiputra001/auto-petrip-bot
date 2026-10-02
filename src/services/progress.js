@@ -26,6 +26,8 @@ class ProgressTracker {
         this.chatId = chatId || (liveMsgObj && (liveMsgObj.safeChatId || (liveMsgObj.id && liveMsgObj.id.remote))) || null;
         // ID pesan hasil pemulihan dari store, dipakai bila objek Message tak tersedia
         this.storeMsgId = null;
+        // Metode edit yang terbukti berhasil ('liveMsg' | 'browser'), agar tak coba ulang yang gagal
+        this.metodeEdit = null;
         this.startTime = Date.now();
     }
 
@@ -126,30 +128,20 @@ class ProgressTracker {
         if (!this.liveMsg && !this.storeMsgId && !this.chatId) return;
 
         const EDIT_TIMEOUT = 8000; // hard cap per operasi edit di VPS
+        const serializedId = this._idPesan() || this.storeMsgId;
 
-        // Punya ID dari store tapi tanpa objek Message → edit langsung di browser
-        if (!this.liveMsg && this.storeMsgId) {
-            if (await this._editViaBrowser(this.storeMsgId, teks)) {
-                logger.debug('PROGRESS', `Edit OK (store id): ${this.storeMsgId}`);
-                return;
-            }
-            this.storeMsgId = null;
+        // Langsung pakai metode yang sudah terbukti berhasil
+        if (this.metodeEdit === 'browser') {
+            if (await this._editViaBrowser(serializedId, teks)) return;
+            this.metodeEdit = null; // tak lagi bekerja → evaluasi ulang
         }
 
-        // Belum punya pesan yang bisa diedit → kirim pesan baru lalu adopsi sebagai liveMsg
-        if (!this.liveMsg) {
-            await this._kirimPesanBaru(teks, EDIT_TIMEOUT);
-            return;
-        }
-
-        const serializedId = this.liveMsg.id ? this.liveMsg.id._serialized : null;
-
-        // ── Retry: jika pesan baru saja dikirim (belum siap diedit), tunggu sejenak ──
-        for (let attempt = 1; attempt <= 2; attempt++) {
+        if (this.liveMsg) {
             // 1. Coba edit langsung lewat object liveMsg
             try {
                 const res = await this._withTimeout(this.liveMsg.edit(teks), EDIT_TIMEOUT, 'liveMsg.edit');
                 if (res) {
+                    this.metodeEdit = 'liveMsg';
                     logger.debug('PROGRESS', `Edit OK (liveMsg): ${serializedId}`);
                     return;
                 }
@@ -158,7 +150,7 @@ class ProgressTracker {
             }
 
             // 2. Coba getMessageById lalu .edit()
-            if (serializedId) {
+            if (serializedId && this.metodeEdit !== 'liveMsg') {
                 try {
                     const freshMsg = await this._withTimeout(
                         this.client.getMessageById(serializedId),
@@ -168,6 +160,8 @@ class ProgressTracker {
                     if (freshMsg) {
                         const res = await this._withTimeout(freshMsg.edit(teks), EDIT_TIMEOUT, 'freshMsg.edit');
                         if (res) {
+                            this.liveMsg = freshMsg;
+                            this.metodeEdit = 'liveMsg';
                             logger.debug('PROGRESS', `Edit OK (getMessageById): ${serializedId}`);
                             return;
                         }
@@ -176,13 +170,12 @@ class ProgressTracker {
                     logger.debug('PROGRESS', `Edit via getMessageById gagal: ${e.message}`);
                 }
             }
-
-            if (attempt < 2) await delay(800); // tunggu pesan siap diedit
         }
 
         // 3. Fallback Khusus VPS: Direct Injection ke Browser WA Web Store
-        const injected = await this._editViaBrowser(serializedId, teks);
-        if (injected) {
+        if (serializedId && await this._editViaBrowser(serializedId, teks)) {
+            this.metodeEdit = 'browser';
+            this.storeMsgId = serializedId;
             logger.debug('PROGRESS', `Edit OK (browser injection): ${serializedId}`);
             return;
         }
@@ -190,6 +183,16 @@ class ProgressTracker {
         // 4. Fallback terakhir: kirim pesan baru, lalu PAKAI pesan baru itu sebagai liveMsg
         //    (agar semua edit berikutnya konsisten ke SATU pesan, tidak dobel)
         await this._kirimPesanBaru(teks, EDIT_TIMEOUT);
+    }
+
+    /**
+     * Serialized id pesan aktif. WA Web kadang memakai `$1` sebagai ganti `_serialized`.
+     * @returns {string|null}
+     */
+    _idPesan() {
+        const id = this.liveMsg && this.liveMsg.id;
+        if (!id) return null;
+        return id._serialized || id.$1 || null;
     }
 
     /**
@@ -220,12 +223,10 @@ class ProgressTracker {
             // Ambil ID-nya dari store browser agar update berikutnya tetap mengedit 1 pesan.
             const recoveredId = await this._cariIdPesanDiStore(chatId, timeoutMs);
             if (recoveredId) {
+                // Pesan hasil pemulihan tidak punya objek Message yang bisa diedit,
+                // jadi langsung pakai injeksi browser.
                 this.storeMsgId = recoveredId;
-                const recovered = await this._bungkusJadiMessage(recoveredId, timeoutMs);
-                if (recovered) {
-                    recovered.safeChatId = chatId;
-                    this.liveMsg = recovered;
-                }
+                this.metodeEdit = 'browser';
                 logger.debug('PROGRESS', `ID pesan dipulihkan dari store: ${recoveredId}`);
                 return;
             }
@@ -235,26 +236,6 @@ class ProgressTracker {
             logger.warn('PROGRESS', `Handle pesan tidak tersedia di ${chatId}. Progress WA dihentikan (log console tetap jalan).`);
         } catch (e) {
             logger.debug('PROGRESS', `Fallback kirim pesan baru gagal: ${e.message}`);
-        }
-    }
-
-    /**
-     * Bungkus serialized id menjadi objek Message (bila memungkinkan).
-     * @param {string} serialized
-     * @param {number} timeoutMs
-     * @returns {Promise<Object|null>}
-     */
-    async _bungkusJadiMessage(serialized, timeoutMs) {
-        try {
-            const msg = await this._withTimeout(
-                this.client.getMessageById(serialized),
-                timeoutMs,
-                'getMessageById(recover)'
-            );
-            return msg && typeof msg.edit === 'function' ? msg : null;
-        } catch (e) {
-            logger.debug('PROGRESS', `Bungkus Message gagal: ${e.message}`);
-            return null;
         }
     }
 
