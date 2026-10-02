@@ -57,26 +57,26 @@ body::before {
     to { opacity: 1; transform: none; }
 }
 
-/* ── Logo dengan stroke putih mengikuti bentuk (bukan kotak) ── */
+/* ── Logo dengan stroke putih halus mengikuti bentuk (bukan kotak) ── */
 .logo-img {
     width: 92px;
     height: 92px;
     object-fit: contain;
     filter:
-        drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
-        drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
-        drop-shadow(1.5px 1.5px 0 #fff) drop-shadow(-1.5px 1.5px 0 #fff)
-        drop-shadow(1.5px -1.5px 0 #fff) drop-shadow(-1.5px -1.5px 0 #fff)
+        drop-shadow(1px 0 0 #fff) drop-shadow(-1px 0 0 #fff)
+        drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff)
+        drop-shadow(0.7px 0.7px 0 #fff) drop-shadow(-0.7px 0.7px 0 #fff)
+        drop-shadow(0.7px -0.7px 0 #fff) drop-shadow(-0.7px -0.7px 0 #fff)
         drop-shadow(0 10px 22px rgba(0, 0, 0, 0.55));
 }
 .logo-img.sm {
     width: 34px;
     height: 34px;
     filter:
-        drop-shadow(1.5px 0 0 #fff) drop-shadow(-1.5px 0 0 #fff)
-        drop-shadow(0 1.5px 0 #fff) drop-shadow(0 -1.5px 0 #fff)
-        drop-shadow(1px 1px 0 #fff) drop-shadow(-1px 1px 0 #fff)
-        drop-shadow(1px -1px 0 #fff) drop-shadow(-1px -1px 0 #fff)
+        drop-shadow(1px 0 0 #fff) drop-shadow(-1px 0 0 #fff)
+        drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff)
+        drop-shadow(0.7px 0.7px 0 #fff) drop-shadow(-0.7px 0.7px 0 #fff)
+        drop-shadow(0.7px -0.7px 0 #fff) drop-shadow(-0.7px -0.7px 0 #fff)
         drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
 }
 
@@ -295,7 +295,15 @@ h2 { margin-bottom: 12px; font-size: 1.15rem; }
     color: var(--muted);
     font-size: 0.85rem;
 }
-.site-footer img { height: 26px; opacity: .95; }
+.site-footer img {
+    height: 26px;
+    opacity: .95;
+    filter:
+        drop-shadow(1px 0 0 #fff) drop-shadow(-1px 0 0 #fff)
+        drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff)
+        drop-shadow(0.7px 0.7px 0 #fff) drop-shadow(-0.7px 0.7px 0 #fff)
+        drop-shadow(0.7px -0.7px 0 #fff) drop-shadow(-0.7px -0.7px 0 #fff);
+}
 
 /* Modal */
 .modal {
