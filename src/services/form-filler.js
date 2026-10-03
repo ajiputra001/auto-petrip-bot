@@ -394,7 +394,18 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
         );
         if (drivers.length === 0) {
             if (originalMsg) await originalMsg.reply(`❌ Driver *${targetNama}* tidak ditemukan dalam database.`);
-            return;
+            return { total: 0, suksesCount: 0, gagalCount: 0, rekapLaporan: [] };
+        }
+    }
+
+    // Lewati driver yang sudah sukses (dipakai scheduler saat melanjutkan
+    // siklus yang terputus, agar form tidak diisi dua kali)
+    if (Array.isArray(options.skipNama) && options.skipNama.length > 0) {
+        const skip = options.skipNama.map(n => String(n).toLowerCase());
+        drivers = drivers.filter(d => !skip.includes(d.nama.toLowerCase()));
+        if (drivers.length === 0) {
+            logger.info('ABSEN', 'Semua driver sudah diproses sebelumnya. Tidak ada yang perlu dikerjakan.');
+            return { total: 0, suksesCount: 0, gagalCount: 0, rekapLaporan: [] };
         }
     }
 
@@ -459,8 +470,16 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
             ringkasanAI: hasil.ringkasanAI,
         });
 
-        if (hasil.status === 'SUKSES') suksesCount++;
-        else gagalCount++;
+        if (hasil.status === 'SUKSES') {
+            suksesCount++;
+            // Dicatat per driver agar progres tidak hilang bila proses mati
+            // (OOM) di tengah siklus — lihat catatSukses() di scheduler.
+            if (typeof options.onSukses === 'function') {
+                try { options.onSukses(driver.nama); } catch (e) { /* abaikan */ }
+            }
+        } else {
+            gagalCount++;
+        }
     }
 
     // Kirim pesan akhir ke live msg

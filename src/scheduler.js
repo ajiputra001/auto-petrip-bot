@@ -86,26 +86,65 @@ async function jalankanAbsenOtomatis(client, alasan = 'cron') {
     }
 
     const hariIni = _tanggalLokal();
-    const state = _bacaState();
-    if (state.lastAbsenDate === hariIni) {
-        logger.debug('SCHEDULER', `Absen otomatis (${alasan}) dilewati: sudah dijalankan hari ini (${hariIni}).`);
+    let state = _bacaState();
+
+    // Hari berganti → mulai dari nol
+    if (state.tanggal !== hariIni) {
+        state = { tanggal: hariIni, selesai: false, suksesNama: [] };
+    }
+
+    if (state.selesai) {
+        logger.debug('SCHEDULER', `Absen otomatis (${alasan}) dilewati: sudah tuntas hari ini (${hariIni}).`);
         return;
     }
 
     sedangBerjalan = true;
+
+    // Nama yang SUDAH sukses — jangan diisi ulang. Penting saat proses mati
+    // (OOM) di tengah siklus lalu catch-up melanjutkan setelah restart.
+    const sudahSukses = new Set(Array.isArray(state.suksesNama) ? state.suksesNama : []);
+
+    if (sudahSukses.size > 0) {
+        logger.warn('SCHEDULER', `Melanjutkan siklus yang terputus. Sudah sukses: ${[...sudahSukses].join(', ')}.`);
+    }
     logger.system(`⏰ Absen massal otomatis dimulai (trigger: ${alasan}, tanggal: ${hariIni})...`);
 
-    // Ditandai lebih dulu supaya crash/restart di tengah jalan tidak memicu absen ganda
-    _tulisState({
-        ...state,
-        lastAbsenDate: hariIni,
-        lastAbsenTrigger: alasan,
-        lastAbsenAt: new Date().toISOString(),
-    });
+    const catatSukses = (nama) => {
+        sudahSukses.add(nama);
+        _tulisState({
+            tanggal: hariIni,
+            selesai: false,
+            suksesNama: [...sudahSukses],
+            lastTrigger: alasan,
+            lastAbsenAt: new Date().toISOString(),
+        });
+    };
+
+    const tandaiSelesai = (catatan) => {
+        _tulisState({
+            tanggal: hariIni,
+            selesai: true,
+            suksesNama: [...sudahSukses],
+            lastTrigger: alasan,
+            selesaiAt: new Date().toISOString(),
+            catatan,
+        });
+    };
 
     try {
-        // Percobaan pertama: seluruh driver.
-        let hasil = await _jalankanSekali(client, null, `${alasan} (percobaan 1/${MAX_PERCOBAAN})`);
+        // Percobaan pertama: semua driver yang belum sukses.
+        const hasil = await _jalankanSekali(client, null, `${alasan} (percobaan 1/${MAX_PERCOBAAN})`, {
+            skipNama: [...sudahSukses],
+            onSukses: catatSukses,
+        });
+
+        // hasil null = siklus error/timeout sebelum tuntas. Jangan tandai selesai:
+        // biarkan catch-up melanjutkan driver yang belum sukses.
+        if (!hasil) {
+            logger.warn('SCHEDULER', 'Siklus terhenti sebelum tuntas. Catch-up akan melanjutkan driver yang belum sukses.');
+            return;
+        }
+
         let perluUlang = _namaPerluUlang(hasil);
 
         // Percobaan berikutnya: HANYA driver yang gagal karena gangguan sesaat.
@@ -116,16 +155,25 @@ async function jalankanAbsenOtomatis(client, alasan = 'cron') {
 
             const sisa = [];
             for (const nama of perluUlang) {
-                const ulang = await _jalankanSekali(client, nama, `${alasan} (ulang ${percobaan}/${MAX_PERCOBAAN}: ${nama})`);
+                const ulang = await _jalankanSekali(
+                    client,
+                    nama,
+                    `${alasan} (ulang ${percobaan}/${MAX_PERCOBAAN}: ${nama})`,
+                    { onSukses: catatSukses }
+                );
                 sisa.push(..._namaPerluUlang(ulang, nama));
             }
             perluUlang = sisa;
         }
 
         if (perluUlang.length === 0) {
-            logger.success('SCHEDULER', `Absen massal otomatis selesai (trigger: ${alasan}).`);
+            tandaiSelesai(`${sudahSukses.size} driver sukses`);
+            logger.success('SCHEDULER', `Absen massal otomatis selesai (trigger: ${alasan}, sukses: ${sudahSukses.size}).`);
         } else {
-            logger.error('SCHEDULER', `Masih gagal setelah ${MAX_PERCOBAAN} percobaan: ${perluUlang.join(', ')}.`);
+            // Ditandai selesai agar catch-up tidak mengulang terus-menerus;
+            // sisanya butuh tindakan manual (cookie/saldo/form berubah).
+            tandaiSelesai(`gagal permanen: ${perluUlang.join(', ')}`);
+            logger.error('SCHEDULER', `Masih gagal setelah ${MAX_PERCOBAAN} percobaan: ${perluUlang.join(', ')}. Perlu pemeriksaan manual.`);
         }
     } finally {
         sedangBerjalan = false;
@@ -138,10 +186,10 @@ async function jalankanAbsenOtomatis(client, alasan = 'cron') {
  * Jalankan satu siklus absen (semua driver atau satu nama) dengan timeout.
  * @returns {Promise<Object|null>} hasil prosesAbsenMassal, null bila error/timeout
  */
-async function _jalankanSekali(client, targetNama, label) {
+async function _jalankanSekali(client, targetNama, label, options = {}) {
     try {
         return await withTimeout(
-            prosesAbsenMassal(client, targetNama, null),
+            prosesAbsenMassal(client, targetNama, null, options),
             ABSEN_MAX_DURASI_MS,
             'prosesAbsenMassal'
         );
@@ -213,13 +261,14 @@ function initScheduler(client) {
     } else {
         const cekTerlewat = async () => {
             try {
-                if (_bacaState().lastAbsenDate === _tanggalLokal()) return;
+                const state = _bacaState();
+                if (state.tanggal === _tanggalLokal() && state.selesai) return;
 
                 const selisihMenit = _menitLokal() - menitJadwal;
                 if (selisihMenit < 0) return;
                 if (selisihMenit * 60 * 1000 > CATCHUP_WINDOW_MS) return;
 
-                logger.warn('SCHEDULER', `Jadwal absen terlewat ${selisihMenit} menit. Menjalankan catch-up...`);
+                logger.warn('SCHEDULER', `Jadwal absen belum tuntas (${selisihMenit} menit lewat). Menjalankan catch-up...`);
                 await jalankanAbsenOtomatis(client, 'catchup');
             } catch (e) {
                 logger.error('SCHEDULER', `Pemeriksaan jadwal terlewat gagal: ${e.message}`);
