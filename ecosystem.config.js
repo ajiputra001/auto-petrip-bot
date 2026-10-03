@@ -6,11 +6,12 @@ module.exports = {
       exec_mode: 'fork',
       instances: 1,
       autorestart: true,
-      exp_backoff_restart_delay: 100,
-      restart_delay: 3000,
+      restart_delay: 5000,
       min_uptime: '30s',
-      max_restarts: 20,
-      kill_timeout: 10000,
+      // Dinaikkan drastis: dengan max_restarts kecil, PM2 menyerah dan menandai app
+      // "errored" sehingga bot mati permanen sampai `pm2 restart all` manual.
+      max_restarts: 1000,
+      kill_timeout: 15000,
       listen_timeout: 15000,
       cron_restart: '0 4 * * *', // Restart otomatis setiap jam 04:00 subuh agar browser selalu fresh
       watch: false, // Disarankan false untuk produksi agar tidak restart tiba-tiba

@@ -2,11 +2,28 @@
 // 🛡️ SELF-HEALING — Cleanup Crash & Zombie Proses
 // ══════════════════════════════════════════
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const logger = require('./logger');
+
+/**
+ * Kill proses Chrome zombie milik form-filler saja.
+ * Pencocokan dibatasi pada `--user-data-dir=<sessionDir>` agar browser
+ * WhatsApp Web (yang memakai .wwebjs_auth) TIDAK ikut terbunuh.
+ */
+function bersihkanZombieChrome() {
+    // pkill -f memakai regex, jadi karakter khusus pada path harus di-escape.
+    const polaAman = `--user-data-dir=${config.sessionDir}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+        // execFileSync tanpa shell → path dengan spasi aman, tidak ada shell injection.
+        execFileSync('pkill', ['-9', '-f', polaAman], { stdio: 'ignore' });
+        logger.debug('SELF-HEALING', 'Zombie Chrome form-filler dibersihkan.');
+    } catch (e) {
+        // exit code 1 = tidak ada proses yang cocok (kondisi normal)
+    }
+}
 
 /**
  * Membersihkan sisa crash:
@@ -17,24 +34,33 @@ const logger = require('./logger');
 function bersihkanSisaCrash() {
     logger.system('Self-Healing: Memulai pembersihan sisa crash...');
 
-    // 1. Kill zombie Chrome processes safely
-    try {
-        execSync('pkill -9 -f "chrome --type=" || true', { stdio: 'ignore' });
-        execSync('pkill -9 -f "chromium --type=" || true', { stdio: 'ignore' });
-        logger.debug('SELF-HEALING', 'Zombie Chrome/Chromium di-terminate.');
-    } catch (e) {
-        // Tidak ada proses yang perlu di-kill
-    }
+    // 1. Kill zombie Chrome milik form-filler
+    bersihkanZombieChrome();
 
-    // 2. Hapus SingletonLock sisa session WA secara dinamis berdasarkan waClientId
+    // 2. Hapus lock sisa session (WA Web & form-filler) agar Chrome mau start ulang
+    const lockNames = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    const sessionRoots = [
+        path.join(config.rootDir, '.wwebjs_auth', `session-${config.waClientId}`),
+    ];
+
     try {
-        const lockPath = path.join(config.rootDir, '.wwebjs_auth', `session-${config.waClientId}`, 'SingletonLock');
-        if (fs.existsSync(lockPath)) {
-            fs.unlinkSync(lockPath);
-            logger.success('SELF-HEALING', 'SingletonLock sisa crash berhasil dihapus.');
+        if (fs.existsSync(config.sessionDir)) {
+            for (const dir of fs.readdirSync(config.sessionDir)) {
+                sessionRoots.push(path.join(config.sessionDir, dir));
+            }
         }
-    } catch (e) {
-        // File tidak ada, abaikan
+    } catch (e) { /* abaikan */ }
+
+    for (const root of sessionRoots) {
+        for (const nama of lockNames) {
+            try {
+                const lockPath = path.join(root, nama);
+                if (fs.existsSync(lockPath) || fs.lstatSync(lockPath, { throwIfNoEntry: false })) {
+                    fs.rmSync(lockPath, { force: true, recursive: true });
+                    logger.debug('SELF-HEALING', `Lock dihapus: ${lockPath}`);
+                }
+            } catch (e) { /* abaikan */ }
+        }
     }
 
     // 3. Bersihkan file temporary screenshot di folder screenshots/
@@ -128,18 +154,36 @@ function bersihkanLogLama() {
  * Register global error handlers untuk mencegah crash total
  */
 function registerErrorHandlers() {
+    // Error puppeteer yang transient & tidak mematikan bot. Restart untuk ini
+    // justru merugikan: bot ikut mati saat sebenarnya masih sehat.
+    const POLA_TRANSIENT = [
+        'detached Frame',
+        'Execution context was destroyed',
+        'Target closed',
+        'Node is detached from document',
+        'Cannot find context with specified id',
+        'Session closed',
+        'ProtocolError',
+    ];
+
+    const isTransient = (msg) => POLA_TRANSIENT.some(p => msg.includes(p));
+
     process.on('uncaughtException', (error) => {
-        logger.error('KERNEL', `Exception fatal tertangkap: ${error.message}`);
-        logger.debug('KERNEL', error.stack || 'No stack trace');
-        try {
-            execSync('pkill -f chrome || true', { stdio: 'ignore' });
-            execSync('pkill -f chromium || true', { stdio: 'ignore' });
-        } catch (e) { /* abaikan */ }
+        const msg = (error && error.message) || String(error);
+
+        if (isTransient(msg)) {
+            logger.warn('KERNEL', `Exception transient diabaikan (bot tetap jalan): ${msg}`);
+            return;
+        }
+
+        logger.error('KERNEL', `Exception fatal tertangkap: ${msg}`);
+        logger.debug('KERNEL', (error && error.stack) || 'No stack trace');
+        bersihkanZombieChrome();
         // Keluar dari proses agar PM2/systemd otomatis melakukan auto-restart bersih
         process.exit(1);
     });
 
-    process.on('unhandledRejection', (reason, promise) => {
+    process.on('unhandledRejection', (reason) => {
         const msg = reason instanceof Error ? reason.message : String(reason);
         logger.error('KERNEL', `Unhandled Promise Rejection: ${msg}`);
         if (reason instanceof Error && reason.stack) {
@@ -148,12 +192,12 @@ function registerErrorHandlers() {
     });
 
     // Graceful shutdown
+    let sedangShutdown = false;
     const shutdown = (signal) => {
+        if (sedangShutdown) return;
+        sedangShutdown = true;
         logger.warn('SYSTEM', `Sinyal ${signal} diterima. Mematikan bot secara aman...`);
-        try {
-            execSync('pkill -f chrome || true', { stdio: 'ignore' });
-            execSync('pkill -f chromium || true', { stdio: 'ignore' });
-        } catch (e) { /* abaikan */ }
+        bersihkanZombieChrome();
         process.exit(0);
     };
 
@@ -164,5 +208,6 @@ function registerErrorHandlers() {
 module.exports = {
     bersihkanSisaCrash,
     bersihkanLogLama,
+    bersihkanZombieChrome,
     registerErrorHandlers,
 };

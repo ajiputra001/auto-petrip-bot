@@ -243,8 +243,26 @@ function hapusFileAman(filePath) {
     }
 }
 
+/**
+ * Jalankan promise dengan hard timeout.
+ * Puppeteer di VPS bisa hang tanpa throw (frame detached / target closed),
+ * sehingga `await` tidak pernah selesai dan seluruh alur membeku.
+ * @param {Promise} promise
+ * @param {number} ms
+ * @param {string} label
+ * @returns {Promise<*>}
+ */
+function withTimeout(promise, ms, label = 'operasi') {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timeout ${ms}ms: ${label}`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 module.exports = {
     delay,
+    withTimeout,
     formatRupiah,
     generateId,
     generateToken,

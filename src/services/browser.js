@@ -5,13 +5,34 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
-const { delay, bacaJSON } = require('../utils/helpers');
+const { delay, bacaJSON, withTimeout } = require('../utils/helpers');
 
 puppeteer.use(StealthPlugin());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const LAUNCH_TIMEOUT_MS = 90000;
+const CLOSE_TIMEOUT_MS = 15000;
+
+/**
+ * Hapus lock sisa crash agar Chrome mau memakai ulang userDataDir.
+ * Tanpa ini, satu kali crash bisa membuat semua absen berikutnya gagal launch.
+ * @param {string} sessionPath
+ */
+function _bersihkanLockSession(sessionPath) {
+    if (!sessionPath) return;
+    for (const nama of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+        try {
+            const target = path.join(sessionPath, nama);
+            if (fs.existsSync(target) || fs.lstatSync(target, { throwIfNoEntry: false })) {
+                fs.rmSync(target, { force: true, recursive: true });
+            }
+        } catch (e) { /* abaikan */ }
+    }
+}
 
 /**
  * Launch browser instance dengan retry mechanism
@@ -26,14 +47,23 @@ async function launchBrowser(sessionPath, retryCount = config.maxRetry) {
         try {
             logger.info('BROWSER', `Launching Chrome (attempt ${attempt}/${retryCount})...`);
 
-            const browser = await puppeteer.launch({
-                headless: 'new',
-                userDataDir: sessionPath,
-                executablePath: config.chromePath,
-                timeout: config.browserTimeout,
-                args: config.puppeteerArgs,
-                dumpio: false,
-            });
+            _bersihkanLockSession(sessionPath);
+
+            // puppeteer.launch bisa menggantung tanpa throw bila VPS kehabisan
+            // memori saat fork Chrome → bungkus timeout agar retry tetap jalan.
+            const browser = await withTimeout(
+                puppeteer.launch({
+                    headless: 'new',
+                    userDataDir: sessionPath,
+                    executablePath: config.chromePath,
+                    timeout: LAUNCH_TIMEOUT_MS,
+                    protocolTimeout: config.browserTimeout,
+                    args: config.puppeteerArgs,
+                    dumpio: false,
+                }),
+                LAUNCH_TIMEOUT_MS,
+                'puppeteer.launch'
+            );
 
             logger.success('BROWSER', 'Chrome berhasil diluncurkan.');
             return browser;
@@ -51,6 +81,32 @@ async function launchBrowser(sessionPath, retryCount = config.maxRetry) {
     }
 
     throw new Error(`Gagal meluncurkan browser setelah ${retryCount} percobaan: ${lastError.message}`);
+}
+
+/**
+ * Tutup browser secara pasti. `browser.close()` bisa menggantung di VPS dan
+ * meninggalkan proses Chrome zombie yang menumpuk sampai memori VPS habis —
+ * penyebab utama bot "lama-lama mati". Jadi: close berbatas waktu, lalu SIGKILL.
+ * @param {import('puppeteer').Browser|null} browser
+ */
+async function tutupBrowser(browser) {
+    if (!browser) return;
+
+    const proc = typeof browser.process === 'function' ? browser.process() : null;
+
+    try {
+        await withTimeout(browser.close(), CLOSE_TIMEOUT_MS, 'browser.close');
+    } catch (e) {
+        logger.warn('BROWSER', `browser.close() gagal/timeout: ${e.message}. Memaksa kill proses Chrome.`);
+    }
+
+    // Pastikan benar-benar mati walau close() sukses tapi proses masih tersisa.
+    if (proc && proc.pid && proc.exitCode === null && !proc.killed) {
+        try {
+            proc.kill('SIGKILL');
+            logger.debug('BROWSER', `Proses Chrome PID ${proc.pid} di-SIGKILL.`);
+        } catch (e) { /* abaikan */ }
+    }
 }
 
 /**
@@ -178,6 +234,7 @@ async function ketikAman(page, element, teks) {
 
 module.exports = {
     launchBrowser,
+    tutupBrowser,
     createPage,
     injectCookies,
     klikTombolTeks,

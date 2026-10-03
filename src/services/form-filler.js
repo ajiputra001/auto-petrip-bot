@@ -7,14 +7,17 @@ const path = require('path');
 const config = require('../config');
 const db = require('../database');
 const logger = require('../utils/logger');
-const { delay, generateNamaScreenshot, hapusFileAman, formatRupiah } = require('../utils/helpers');
-const { launchBrowser, createPage, injectCookies, klikTombolTeks, ketikAman } = require('./browser');
+const { delay, generateNamaScreenshot, hapusFileAman, formatRupiah, withTimeout } = require('../utils/helpers');
+const { launchBrowser, tutupBrowser, createPage, injectCookies, klikTombolTeks, ketikAman } = require('./browser');
 const { generasiRingkasanAI } = require('./ai-summary');
 const ProgressTracker = require('./progress');
 const wallet = require('../wallet');
 const auth = require('../auth');
 const { getSenderWa } = require('../commands/akun');
 const settings = require('../settings');
+
+// Batas waktu maksimal pengisian form untuk SATU driver
+const DRIVER_TIMEOUT_MS = 8 * 60 * 1000;
 
 /**
  * Isi Google Form untuk satu driver
@@ -236,10 +239,8 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         return { status: 'GAGAL', alasan: error.message, statusKerja: '-', ringkasanAI };
 
     } finally {
-        // Cleanup browser & temp SS
-        if (browser) {
-            try { await browser.close(); } catch (e) { /* abaikan */ }
-        }
+        // Cleanup browser & temp SS — wajib pasti mati agar tidak jadi zombie Chrome
+        await tutupBrowser(browser);
         if (tempScreenshotPath) {
             hapusFileAman(tempScreenshotPath);
         }
@@ -428,10 +429,28 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
         const driver = drivers[i];
         logger.system(`▶️ RUNNING WORKER ${i + 1}/${drivers.length}: ${driver.nama.toUpperCase()}`);
 
-        const hasil = await isiGoogleForm(waClient, driver, liveMsgObj, senderWa, {
-            ...options,
-            chatId: originalMsg ? targetChatId : null,
-        });
+        // Batas waktu per driver: satu driver yang menggantung tidak boleh
+        // membekukan seluruh siklus (terutama saat dipicu cron jam 8 pagi).
+        let hasil;
+        try {
+            hasil = await withTimeout(
+                isiGoogleForm(waClient, driver, liveMsgObj, senderWa, {
+                    ...options,
+                    chatId: originalMsg ? targetChatId : null,
+                }),
+                DRIVER_TIMEOUT_MS,
+                `isiGoogleForm(${driver.nama})`
+            );
+        } catch (e) {
+            logger.error(driver.nama, `Proses dihentikan paksa: ${e.message}`);
+            hasil = {
+                status: 'GAGAL',
+                alasan: `Proses melebihi batas waktu ${DRIVER_TIMEOUT_MS / 60000} menit dan dihentikan.`,
+                statusKerja: '-',
+                ringkasanAI: '-',
+            };
+        }
+
         rekapLaporan.push({
             nama: driver.nama,
             status: hasil.status,
@@ -494,6 +513,8 @@ INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
     if (!rekapTerkirim && originalMsg) {
         try { await originalMsg.reply(rekap); } catch (err) { /* abaikan */ }
     }
+
+    return { total: drivers.length, suksesCount, gagalCount, rekapLaporan };
 }
 
 module.exports = {
