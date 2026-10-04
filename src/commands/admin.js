@@ -7,7 +7,8 @@ const wallet = require('../wallet');
 const payment = require('../payment');
 const settings = require('../settings');
 const db = require('../database');
-const { formatRupiah } = require('../utils/helpers');
+const config = require('../config');
+const { formatRupiah, withTimeout } = require('../utils/helpers');
 const { getUserIdByWa, getSenderWa } = require('./akun');
 
 /**
@@ -43,6 +44,8 @@ async function handleAdminMenu(msg) {
     teks += `🔗 \`/setform [link]\` — Ganti link Google Form\n`;
     teks += `👁️ \`/getform\` — Lihat link form aktif\n`;
     teks += `↩️ \`/resetform\` — Kembalikan ke link default (.env)\n`;
+    teks += `🆔 \`/idgrup\` — Lihat ID chat ini & cek tujuan laporan\n`;
+    teks += `👥 \`/listgrup\` — Daftar semua grup + ID-nya\n`;
     teks += `🚚 \`/absenkan [Nama|email]\` — Absen manual atas nama driver\n`;
     teks += `🆓 \`/absenkan [Nama] gratis\` — Absen tanpa potong saldo\n`;
     teks += `👥 \`/absenkansemua\` — Absen semua driver (tanpa potong saldo)\n`;
@@ -342,6 +345,64 @@ async function handleResetForm(msg) {
     );
 }
 
+/**
+ * /idgrup — tampilkan ID chat ini & bandingkan dengan WA_GRUP aktif
+ */
+async function handleIdGrup(msg) {
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
+
+    const idChat = msg.safeChatId || msg.from || '-';
+    const isGrup = String(idChat).endsWith('@g.us');
+    const cocok = idChat === config.waGrup;
+
+    let teks = `🆔 *ID CHAT INI*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    teks += `\`\`\`${idChat}\`\`\`\n`;
+    teks += `Tipe : ${isGrup ? 'Grup 👥' : 'Chat pribadi 👤'}\n\n`;
+    teks += `📨 *WA_GRUP aktif (tujuan laporan)*\n\`\`\`${config.waGrup || '(belum diatur)'}\`\`\`\n\n`;
+
+    if (!isGrup) {
+        teks += `ℹ️ Kirim \`/idgrup\` di DALAM grup laporan untuk mendapatkan ID grupnya.`;
+    } else if (cocok) {
+        teks += `✅ *SUDAH COCOK.* Rekap absen akan dikirim ke grup ini.`;
+    } else {
+        teks += `⚠️ *BELUM COCOK!* Rekap absen TIDAK dikirim ke grup ini.\n\n`;
+        teks += `Perbaiki di VPS:\n`;
+        teks += `1. \`nano .env\`\n`;
+        teks += `2. Ubah jadi: \`WA_GRUP=${idChat}\`\n`;
+        teks += `3. \`pm2 restart auto-petrip-bot --update-env\``;
+    }
+    return msg.reply(teks);
+}
+
+/**
+ * /listgrup — daftar semua grup yang diikuti bot beserta ID-nya
+ */
+async function handleListGrup(msg, pesan, waClient) {
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
+
+    let chats;
+    try {
+        chats = await withTimeout(waClient.getChats(), 30000, 'getChats');
+    } catch (e) {
+        return msg.reply(`❌ Gagal mengambil daftar chat: _${e.message}_`);
+    }
+
+    const grup = (chats || []).filter(c => c.id && String(c.id._serialized || '').endsWith('@g.us'));
+    if (grup.length === 0) {
+        return msg.reply(`📭 Bot belum tergabung di grup mana pun.`);
+    }
+
+    let teks = `👥 *DAFTAR GRUP (${grup.length})*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    grup.forEach((c, i) => {
+        const id = c.id._serialized;
+        const aktif = id === config.waGrup ? ' ✅ *(tujuan laporan)*' : '';
+        teks += `\n${i + 1}. *${c.name || '(tanpa nama)'}*${aktif}\n\`\`\`${id}\`\`\`\n`;
+    });
+    teks += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    teks += `Salin ID grup yang diinginkan ke \`WA_GRUP\` di file .env, lalu restart bot.`;
+    return msg.reply(teks);
+}
+
 module.exports = {
     handleAdminMenu,
     handleListUser,
@@ -355,6 +416,8 @@ module.exports = {
     handleSetForm,
     handleGetForm,
     handleResetForm,
+    handleIdGrup,
+    handleListGrup,
     handleAbsenkan,
     handleAbsenkanSemua,
     handleLinkDriverUser,
