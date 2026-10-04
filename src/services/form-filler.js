@@ -19,6 +19,40 @@ const settings = require('../settings');
 // Batas waktu maksimal pengisian form untuk SATU driver
 const DRIVER_TIMEOUT_MS = 8 * 60 * 1000;
 
+// Pengiriman pesan WA ke grup/driver
+const KIRIM_TIMEOUT_MS = 30000;
+const KIRIM_MAX_PERCOBAAN = 3;
+
+/**
+ * Kirim pesan WA dengan timeout & retry.
+ * `sendMessage` bisa MENGGANTUNG tanpa throw di VPS (frame WA Web detached).
+ * Tanpa timeout, pengiriman rekap tidak pernah selesai dan laporan hilang
+ * walau semua form sudah terisi sukses.
+ * @param {Object} waClient
+ * @param {string} tujuan
+ * @param {string} pesan
+ * @param {string} label - untuk log
+ * @returns {Promise<boolean>} true bila terkirim
+ */
+async function _kirimPesanAman(waClient, tujuan, pesan, label = 'pesan') {
+    for (let percobaan = 1; percobaan <= KIRIM_MAX_PERCOBAAN; percobaan++) {
+        try {
+            await withTimeout(
+                waClient.sendMessage(tujuan, pesan),
+                KIRIM_TIMEOUT_MS,
+                `sendMessage(${tujuan})`
+            );
+            logger.success('KIRIM', `${label} terkirim ke ${tujuan}.`);
+            return true;
+        } catch (e) {
+            logger.warn('KIRIM', `Gagal kirim ${label} ke ${tujuan} (percobaan ${percobaan}/${KIRIM_MAX_PERCOBAAN}): ${e.message}`);
+            if (percobaan < KIRIM_MAX_PERCOBAAN) await delay(5000 * percobaan);
+        }
+    }
+    logger.error('KIRIM', `${label} GAGAL TOTAL ke ${tujuan} setelah ${KIRIM_MAX_PERCOBAAN} percobaan.`);
+    return false;
+}
+
 /**
  * Isi Google Form untuk satu driver
  * @param {Object} waClient - WhatsApp client instance
@@ -336,11 +370,7 @@ INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
     pesan += `🤖 _System Powered by Ajiputra-tech v1.0_${disclaimer}`;
 
     for (const tujuan of _tujuanLaporan(chatId)) {
-        try {
-            await waClient.sendMessage(tujuan, pesan);
-        } catch (e) {
-            logger.warn(driver.nama, `Gagal kirim laporan ke ${tujuan}: ${e.message}`);
-        }
+        await _kirimPesanAman(waClient, tujuan, pesan, `laporan ${driver.nama}`);
     }
 }
 
@@ -364,16 +394,11 @@ async function _kirimAlertCookieExpired(waClient, driver) {
 
     const driverMsg = `⚠️ *PERINGATAN SINKRONISASI AKUN* ⚠️\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHalo *${driver.nama}*,\n\nSesi login Google Account Anda di sistem kami telah *KEDALUWARSA / LOGOUT*.\n\nMohon segera perbarui cookie Anda dengan cara:\n1️⃣ Dapatkan file JSON cookie baru dari browser laptop/HP Anda.\n2️⃣ Kirim file JSON tersebut ke nomor bot ini dengan teks caption:\n\`/updatecookie ${driver.nama.split(' ')[0]}\`\n\n_Sistem tidak dapat mengisi absen otomatis Anda sampai cookie diperbarui._`;
 
-    try {
-        await waClient.sendMessage(config.waGrup, adminMsg);
-    } catch (e) {
-        logger.warn('ALERT', `Gagal mengirim alert cookie expired ke Grup: ${e.message}`);
+    if (config.waGrup) {
+        await _kirimPesanAman(waClient, config.waGrup, adminMsg, 'alert cookie (grup)');
     }
-
-    try {
-        await waClient.sendMessage(driver.noWa, driverMsg);
-    } catch (e) {
-        logger.warn('ALERT', `Gagal mengirim alert cookie expired ke Driver: ${e.message}`);
+    if (driver.noWa) {
+        await _kirimPesanAman(waClient, driver.noWa, driverMsg, 'alert cookie (driver)');
     }
 }
 
@@ -482,12 +507,25 @@ async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null
         }
     }
 
-    // Kirim pesan akhir ke live msg
+    // Kirim pesan akhir ke live msg. Dibungkus timeout: getMessageById/edit bisa
+    // menggantung di VPS dan menahan eksekusi sebelum rekap sempat dikirim.
     if (liveMsgObj && liveMsgObj.id && liveMsgObj.id._serialized) {
         try {
-            const freshMsg = await waClient.getMessageById(liveMsgObj.id._serialized);
-            await freshMsg.edit(`🚨 *ENGINE TERMINATED*\nTugas selesai. Menghimpun rekapitulasi data...`);
-        } catch (e) { /* abaikan */ }
+            const freshMsg = await withTimeout(
+                waClient.getMessageById(liveMsgObj.id._serialized),
+                15000,
+                'getMessageById(final)'
+            );
+            if (freshMsg) {
+                await withTimeout(
+                    freshMsg.edit(`🚨 *ENGINE TERMINATED*\nTugas selesai. Menghimpun rekapitulasi data...`),
+                    15000,
+                    'edit(final)'
+                );
+            }
+        } catch (e) {
+            logger.debug('REKAP', `Pesan akhir live msg dilewati: ${e.message}`);
+        }
     }
 
     // ── Build Rekap Laporan ──
@@ -519,14 +557,23 @@ Robot ini di ciptakan hanya untuk meringankan kerjaan para pengguna sehari-hari 
 INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
 
     // Kirim ke grup laporan & chat pemicu
+    const tujuanRekap = _tujuanLaporan(originalMsg ? targetChatId : null);
+    if (tujuanRekap.length === 0) {
+        logger.error('REKAP', 'Tidak ada tujuan laporan! Periksa WA_GRUP di .env.');
+    }
+
     let rekapTerkirim = false;
-    for (const tujuan of _tujuanLaporan(originalMsg ? targetChatId : null)) {
-        try {
-            await waClient.sendMessage(tujuan, rekap);
+    for (const tujuan of tujuanRekap) {
+        if (await _kirimPesanAman(waClient, tujuan, rekap, 'rekap harian')) {
             rekapTerkirim = true;
-        } catch (e) {
-            logger.warn('REKAP', `Gagal kirim rekap ke ${tujuan}: ${e.message}`);
         }
+    }
+
+    // Jaring pengaman: jangan biarkan laporan hilang bila ID grup salah /
+    // bot sudah dikeluarkan dari grup. Kirim ke admin sebagai cadangan.
+    if (!rekapTerkirim && config.waAdmin && !tujuanRekap.includes(config.waAdmin)) {
+        logger.warn('REKAP', `Semua tujuan gagal. Mengirim rekap ke admin (${config.waAdmin}) sebagai cadangan.`);
+        rekapTerkirim = await _kirimPesanAman(waClient, config.waAdmin, rekap, 'rekap harian (cadangan admin)');
     }
 
     if (!rekapTerkirim && originalMsg) {

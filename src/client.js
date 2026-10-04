@@ -56,6 +56,30 @@ function pasangPengawasHalaman(client) {
 }
 
 /**
+ * Verifikasi grup tujuan laporan bisa dijangkau.
+ * Bila ID grup salah atau bot sudah dikeluarkan, rekap absen akan hilang
+ * tanpa jejak — jadi masalahnya dilaporkan saat startup, bukan saat jam 8.
+ * @param {Client} client
+ */
+async function verifikasiGrupLaporan(client) {
+    if (!config.waGrup) {
+        logger.error('LAPORAN', 'WA_GRUP belum diatur! Rekap absen tidak akan terkirim ke grup.');
+        return;
+    }
+
+    try {
+        const chat = await withTimeout(client.getChatById(config.waGrup), 20000, 'getChatById(grup)');
+        if (chat) {
+            logger.success('LAPORAN', `Grup laporan terjangkau: "${chat.name || chat.id._serialized}".`);
+            return;
+        }
+        logger.error('LAPORAN', `Grup laporan ${config.waGrup} tidak ditemukan.`);
+    } catch (e) {
+        logger.error('LAPORAN', `Grup laporan ${config.waGrup} TIDAK terjangkau: ${e.message}. Periksa WA_GRUP di .env & pastikan bot masih anggota grup.`);
+    }
+}
+
+/**
  * Health probe: pastikan browser & halaman WA Web benar-benar masih responsif.
  * Cek `getState()` saja tidak cukup — di VPS halaman bisa mati/detached
  * sementara `getState()` tetap mengembalikan nilai lama atau menggantung.
@@ -173,6 +197,7 @@ function createClient() {
         sudahReady = true;
         clearTimeout(bootTimer);
         pasangPengawasHalaman(client);
+        verifikasiGrupLaporan(client);
 
         // Patch Msg.get in the browser to fix message resolution (e.g. edit, delete) with $1 ID renaming
         try {
