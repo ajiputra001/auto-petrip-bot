@@ -24,6 +24,7 @@ const {
 } = require('./admin');
 const { showAdminMenu, handleAdminInput, clearAdminState } = require('./admin-ui');
 const { handleBackup, handleRestore, handleListBackup } = require('./backup');
+const { handleAdjustSemua, handleHapusAkun } = require('./admin-massal');
 
 /**
  * Daftar semua perintah resmi untuk kecerdasan rekomendasi typo
@@ -38,7 +39,8 @@ const KNOWN_COMMANDS = [
     '/admin', '/listuser', '/aktifkan', '/nonaktifkan', '/setadmin', '/adminreset', '/adjust', '/orderlist', '/adminstat',
     '/setform', '/getform', '/resetform', '/absenkan', '/absenkansemua', '/linkdriveruser',
     '/idgrup', '/listgrup',
-    '/backup', '/restore', '/listbackup'
+    '/backup', '/restore', '/listbackup',
+    '/adjustsemua', '/hapusakun'
 ];
 
 /**
@@ -87,7 +89,10 @@ const ROUTES = [
     { match: (cmd) => cmd.startsWith('/nonaktifkan ') || cmd === '/nonaktifkan', handler: handleNonaktifkan },
     { match: (cmd) => cmd.startsWith('/setadmin ') || cmd === '/setadmin',  handler: handleSetAdmin },
     { match: (cmd) => cmd.startsWith('/adminreset ') || cmd === '/adminreset', handler: handleAdminReset },
+    // /adjustsemua harus diperiksa sebelum /adjust agar tidak tertangkap duluan
+    { match: (cmd) => cmd.startsWith('/adjustsemua ') || cmd === '/adjustsemua', handler: handleAdjustSemua },
     { match: (cmd) => cmd.startsWith('/adjust ') || cmd === '/adjust',      handler: handleAdjust },
+    { match: (cmd) => cmd.startsWith('/hapusakun ') || cmd === '/hapusakun', handler: handleHapusAkun },
     { match: (cmd) => cmd === '/orderlist',                                 handler: handleOrderList },
     { match: (cmd) => cmd === '/adminstat',                                 handler: handleAdminStat },
     { match: (cmd) => cmd.startsWith('/setform ') || cmd === '/setform',    handler: handleSetForm },

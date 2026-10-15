@@ -69,6 +69,35 @@ function clearWaSession(noWa) {
 }
 
 /**
+ * Cabut semua sesi WA milik satu user.
+ *
+ * Satu akun bisa tertaut ke beberapa nomor/penanda (@c.us dan @lid), jadi
+ * menghapus satu per satu tidak cukup — sisa sesi membuat akun yang sudah
+ * dihapus tetap terlihat "login".
+ *
+ * @param {string} userId
+ * @returns {number} Jumlah sesi yang dicabut
+ */
+function clearAllWaSessions(userId) {
+    const sessions = _readSessions();
+    let n = 0;
+    for (const [wa, uid] of Object.entries(sessions)) {
+        if (uid === userId) { delete sessions[wa]; n++; }
+    }
+    if (n) _writeSessions(sessions);
+    return n;
+}
+
+/**
+ * Ambil semua nomor WA (@c.us) milik satu user, untuk tujuan notifikasi.
+ */
+function getWaNumbersByUserId(userId) {
+    return Object.entries(_readSessions())
+        .filter(([wa, uid]) => uid === userId && wa.endsWith('@c.us'))
+        .map(([wa]) => wa);
+}
+
+/**
  * /daftar [email] [password] [nama driver]
  * Registrasi akun baru via WhatsApp — terikat ke satu nama driver
  */
@@ -715,4 +744,6 @@ module.exports = {
     getSenderWa,
     setWaSession,
     clearWaSession,
+    clearAllWaSessions,
+    getWaNumbersByUserId,
 };

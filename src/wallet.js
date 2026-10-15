@@ -50,6 +50,26 @@ function getTransactions(userId, limit = 20) {
 }
 
 /**
+ * Hapus dompet user beserta riwayatnya.
+ * Dipakai saat akun dihapus agar saldo tidak menggantung tanpa pemilik.
+ *
+ * @param {string} userId
+ * @returns {{ success: boolean, saldoTerakhir: number }}
+ */
+function removeWallet(userId) {
+    const wallets = _readWallets();
+    const saldoTerakhir = wallets[userId] ? wallets[userId].balance : 0;
+
+    if (wallets[userId]) {
+        delete wallets[userId];
+        _writeWallets(wallets);
+        logger.warn('WALLET', `Dompet ${userId} dihapus (saldo terakhir ${saldoTerakhir}).`);
+    }
+
+    return { success: true, saldoTerakhir };
+}
+
+/**
  * Mutasi saldo secara atomik (dengan pencatatan transaksi)
  * @param {string} userId
  * @param {number} amount - Positif = topup/masuk, negatif = potong/keluar
@@ -157,6 +177,7 @@ module.exports = {
     ensureWallet,
     getBalance,
     getTransactions,
+    removeWallet,
     mutateBalance,
     chargeAbsen,
     summary,

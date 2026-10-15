@@ -256,6 +256,35 @@ function updateUser(userId, patch) {
 }
 
 /**
+ * Hapus akun user secara permanen.
+ *
+ * Admin terakhir tidak boleh dihapus: tanpa admin, tidak ada lagi yang bisa
+ * mengelola user maupun saldo lewat WhatsApp.
+ *
+ * @param {string} userId
+ * @returns {{ success: boolean, user?: Object, error?: string }}
+ */
+function deleteUser(userId) {
+    const users = _readUsers();
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx === -1) return { success: false, error: 'User tidak ditemukan.' };
+
+    if (users[idx].role === 'admin') {
+        const jumlahAdmin = users.filter(u => u.role === 'admin').length;
+        if (jumlahAdmin <= 1) {
+            return { success: false, error: 'Ini admin terakhir — tidak boleh dihapus. Jadikan user lain admin dulu (`/setadmin`).' };
+        }
+    }
+
+    const terhapus = _sanitizeUser(users[idx]);
+    users.splice(idx, 1);
+    _writeUsers(users);
+
+    logger.warn('AUTH', `Akun ${terhapus.email} dihapus permanen.`);
+    return { success: true, user: terhapus };
+}
+
+/**
  * Reset password user oleh admin
  */
 function adminResetPassword(userId, newPassword) {
@@ -307,6 +336,7 @@ module.exports = {
     setActive,
     setRole,
     updateUser,
+    deleteUser,
     adminResetPassword,
     bootstrapAdmin,
 };
