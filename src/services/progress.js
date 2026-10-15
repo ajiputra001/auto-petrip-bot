@@ -12,13 +12,9 @@ const { kartu, tebal, miring, cabang } = require('../utils/tampilan');
 const JUDUL_PANEL = '🤖 *AUTOBOT — PROSES ABSEN*';
 
 // Penanda untuk menemukan kembali panel di store browser WA Web.
-// Harus mencakup teks loader awal DAN teks panel setelah diperbarui — kalau
-// tidak, panel yang sudah di-edit jadi tak dikenali dan bot mengirim duplikat.
-const PENANDA_PANEL = [
-    'AUTOBOT — PROSES ABSEN',
-    'SYSTEM RUNNING',
-    'ENGINE TERMINATED',
-];
+// Pesan loader awal kini memakai judul yang sama dengan panel, jadi satu
+// penanda sudah cukup untuk mengenali panel di tahap mana pun.
+const PENANDA_PANEL = ['AUTOBOT — PROSES ABSEN'];
 
 /**
  * Sesi panel progres yang dipakai BERSAMA oleh seluruh driver dalam satu siklus.
@@ -257,6 +253,10 @@ class ProgressTracker {
             (this.liveMsg && (this.liveMsg.safeChatId || (this.liveMsg.id && this.liveMsg.id.remote)));
         if (!chatId) return;
 
+        // Panel lama tidak bisa diedit lagi → hapus supaya tidak jadi pesan
+        // yatim yang menggantung di chat saat panel pengganti dikirim.
+        const panelLama = this.liveMsg;
+
         try {
             const newMsg = await this._withTimeout(
                 this.client.sendMessage(chatId, teks),
@@ -267,7 +267,9 @@ class ProgressTracker {
                 // Simpan safeChatId supaya fallback berikutnya tetap tahu tujuannya
                 newMsg.safeChatId = chatId;
                 this.liveMsg = newMsg; // ganti referensi → tidak ada pesan ganda
+                this.metodeEdit = null; // handle baru → metode lama belum tentu berlaku
                 logger.debug('PROGRESS', `Kirim pesan baru & adopsi sebagai liveMsg ke ${chatId}`);
+                if (panelLama) await this._hapusPesan(panelLama);
                 return;
             }
 
@@ -288,6 +290,21 @@ class ProgressTracker {
             logger.warn('PROGRESS', `Handle pesan tidak tersedia di ${chatId}. Progress WA dihentikan (log console tetap jalan).`);
         } catch (e) {
             logger.debug('PROGRESS', `Fallback kirim pesan baru gagal: ${e.message}`);
+        }
+    }
+
+    /**
+     * Hapus pesan panel yang sudah tidak terpakai (hapus untuk semua).
+     * Kegagalan diabaikan: pesan yatim hanya masalah kerapian, bukan fungsi.
+     * @param {Object} msg
+     */
+    async _hapusPesan(msg) {
+        if (!msg || typeof msg.delete !== 'function') return;
+        try {
+            await this._withTimeout(msg.delete(true), 8000, 'delete(panel lama)');
+            logger.debug('PROGRESS', 'Panel lama dihapus agar tidak dobel.');
+        } catch (e) {
+            logger.debug('PROGRESS', `Hapus panel lama gagal: ${e.message}`);
         }
     }
 
@@ -410,6 +427,32 @@ class ProgressTracker {
      */
     async finish(teks) {
         await this._editPesan(teks);
+    }
+
+    /**
+     * Tutup panel di akhir siklus.
+     *
+     * Panel progres sifatnya sementara — begitu kartu laporan terkirim, panel
+     * hanya jadi sisa yang membingungkan. Jadi dihapus saja. Bila penghapusan
+     * ditolak WhatsApp, panel diringkas jadi satu baris sebagai cadangan.
+     */
+    async tutup() {
+        const msg = this.liveMsg;
+
+        if (msg && typeof msg.delete === 'function') {
+            try {
+                await this._withTimeout(msg.delete(true), 8000, 'delete(panel)');
+                logger.debug('PROGRESS', 'Panel progres ditutup & dihapus.');
+                this.sesi.msg = null;
+                this.sesi.storeMsgId = null;
+                this.sesi.metodeEdit = null;
+                return;
+            } catch (e) {
+                logger.debug('PROGRESS', `Hapus panel gagal, diringkas saja: ${e.message}`);
+            }
+        }
+
+        await this._editPesan(`✅ ${miring('Proses absen selesai. Laporan menyusul di bawah.')}`);
     }
 }
 

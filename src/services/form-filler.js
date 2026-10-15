@@ -8,7 +8,7 @@ const config = require('../config');
 const db = require('../database');
 const logger = require('../utils/logger');
 const { delay, generateNamaScreenshot, hapusFileAman, formatRupiah, withTimeout } = require('../utils/helpers');
-const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
+const { kartu, kode, tebal, miring, cabang, GARIS } = require('../utils/tampilan');
 const {
     launchBrowser,
     tutupBrowser,
@@ -22,7 +22,7 @@ const {
 } = require('./browser');
 const { generasiRingkasanAI } = require('./ai-summary');
 const ProgressTracker = require('./progress');
-const { buatSesiPanel } = ProgressTracker;
+const { buatSesiPanel, JUDUL_PANEL } = ProgressTracker;
 const wallet = require('../wallet');
 const auth = require('../auth');
 const { getSenderWa } = require('../commands/akun');
@@ -825,7 +825,7 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
         try {
             liveMsgObj = await waClient.sendMessage(
                 targetChatId,
-                `🤖 *[SYSTEM RUNNING]* Mempersiapkan instrumen browser server...`
+                `${JUDUL_PANEL}\n${GARIS}\n🔄 ${miring('Menyiapkan browser server...')}`
             );
         } catch (e) {
             logger.warn('PROGRESS', `Gagal kirim pesan loader awal: ${e.message}`);
@@ -833,6 +833,10 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
         // Simpan safeChatId agar fallback kirim pesan baru di progress.js tahu tujuannya
         if (liveMsgObj) {
             liveMsgObj.safeChatId = targetChatId;
+            // WhatsApp butuh jeda singkat untuk mendaftarkan pesan sebelum bisa
+            // diedit. Tanpa ini, edit pertama (Stage 0) terjadi di detik yang
+            // sama dengan pengiriman, gagal, lalu panel dikirim ulang → dobel.
+            await delay(1500);
         }
         logger.info('PROGRESS', `liveMsgObj created - ChatJID: ${liveMsgObj?.id?.remote || 'N/A'}, ID: ${liveMsgObj?.id?._serialized || 'N/A'}, fromMe: ${liveMsgObj?.fromMe}, chatId: ${targetChatId}, senderWa: ${senderWa || 'N/A'}`);
     }
@@ -892,19 +896,15 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
         }
     }
 
-    // Tutup panel progres lewat sesi bersama, BUKAN lewat liveMsgObj awal.
-    // liveMsgObj bisa sudah basi bila di tengah siklus panel dikirim ulang;
-    // memakainya di sini membuat pesan penutup nyasar jadi panel kedua.
+    // Panel progres sudah selesai tugasnya — hapus agar chat hanya menyisakan
+    // kartu laporan. Dipakai lewat sesi bersama, bukan liveMsgObj awal yang
+    // bisa sudah basi bila panel sempat dikirim ulang di tengah siklus.
     if (sesiPanel.msg || sesiPanel.storeMsgId || sesiPanel.chatId) {
         try {
             const penutup = new ProgressTracker(waClient, sesiPanel, { nama: 'SISTEM', id: '-' }, false);
-            await withTimeout(
-                penutup.finish(`🚨 *ENGINE TERMINATED*\nTugas selesai. Menghimpun rekapitulasi data...`),
-                15000,
-                'finish(final)'
-            );
+            await withTimeout(penutup.tutup(), 15000, 'tutup(panel)');
         } catch (e) {
-            logger.debug('REKAP', `Pesan akhir live msg dilewati: ${e.message}`);
+            logger.debug('REKAP', `Penutupan panel dilewati: ${e.message}`);
         }
     }
 
