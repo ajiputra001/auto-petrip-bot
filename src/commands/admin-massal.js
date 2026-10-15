@@ -177,6 +177,10 @@ async function handleAdjustSemua(msg, pesan, waClient) {
 
 /**
  * Lakukan mutasi saldo untuk daftar user, lalu laporkan hasilnya.
+ *
+ * Diekspor agar panel `/admin` bisa langsung mengeksekusi setelah
+ * konfirmasi tombolnya sendiri, tanpa memaksa admin mengetik ulang
+ * `/adjustsemua ya`.
  */
 async function _jalankanAdjust(msg, waClient, nominal, userIds) {
     await msg.reply(`⚡ Memproses ${userIds.length} akun...`);
@@ -344,4 +348,60 @@ async function handleHapusAkun(msg, pesan) {
     );
 }
 
-module.exports = { handleAdjustSemua, handleHapusAkun };
+/**
+ * Hapus akun secara langsung (dipakai panel `/admin` setelah konfirmasinya
+ * sendiri). Pengaman admin-terakhir tetap berlaku lewat auth.deleteUser().
+ *
+ * @param {Object} msg
+ * @param {string} userId
+ */
+async function jalankanHapusAkun(msg, userId) {
+    const user = auth.findUserById(userId);
+    if (!user) return msg.reply(`❌ Akun sudah tidak ada.`);
+
+    const { getUserIdByWa, getSenderWa } = require('./akun');
+    if (getUserIdByWa(getSenderWa(msg)) === user.id) {
+        return msg.reply(
+            `❌ *TIDAK BISA MENGHAPUS DIRI SENDIRI*\n` +
+            `Anda akan langsung kehilangan akses admin.`
+        );
+    }
+
+    let namaArsip = null;
+    try {
+        const arsip = await require('../services/backup').buatBackup({
+            alasan: `pra-hapus akun ${user.email}`,
+        });
+        namaArsip = arsip.nama;
+    } catch (e) {
+        logger.warn('ADMIN', `Cadangan pra-hapus akun gagal: ${e.message}`);
+    }
+
+    const hapus = auth.deleteUser(user.id);
+    if (!hapus.success) return msg.reply(`❌ *GAGAL MENGHAPUS*\n_${hapus.error}_`);
+
+    const dompet = wallet.removeWallet(user.id);
+    const sesi = clearAllWaSessions(user.id);
+
+    logger.warn('ADMIN', `Akun ${user.email} dihapus oleh ${msg.from}`);
+    return msg.reply(
+        `✅ *AKUN DIHAPUS*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `👤 ${user.nama}\n📧 ${user.email}\n` +
+        `💰 Saldo terhapus: ${formatRupiah(dompet.saldoTerakhir)}\n` +
+        `🔓 Sesi dicabut : ${sesi}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━\n` +
+        (namaArsip
+            ? `🛟 Dicadangkan dulu sebagai:\n\`${namaArsip}\`\n_Pulihkan dengan \`/restore\` bila salah hapus._`
+            : `⚠️ _Cadangan gagal dibuat — penghapusan tidak bisa dibatalkan._`) +
+        `\n\n💡 Data driver *tidak* ikut terhapus. Pakai \`/hapusdriver\` bila perlu.`
+    );
+}
+
+module.exports = {
+    handleAdjustSemua,
+    handleHapusAkun,
+    jalankanAdjustMassal: _jalankanAdjust,
+    jalankanHapusAkun,
+    calonPenerima: _calonPenerima,
+    pilihDariNomor: _pilihDariNomor,
+};
