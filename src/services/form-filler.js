@@ -8,7 +8,17 @@ const config = require('../config');
 const db = require('../database');
 const logger = require('../utils/logger');
 const { delay, generateNamaScreenshot, hapusFileAman, formatRupiah, withTimeout } = require('../utils/helpers');
-const { launchBrowser, tutupBrowser, createPage, injectCookies, klikTombolTeks, ketikAman } = require('./browser');
+const {
+    launchBrowser,
+    tutupBrowser,
+    createPage,
+    bukaHalaman,
+    injectCookies,
+    tutupDialogGangguan,
+    klikTombolTeks,
+    klikAriaLabel,
+    ketikAman,
+} = require('./browser');
 const { generasiRingkasanAI } = require('./ai-summary');
 const ProgressTracker = require('./progress');
 const wallet = require('../wallet');
@@ -22,6 +32,14 @@ const DRIVER_TIMEOUT_MS = 8 * 60 * 1000;
 // Pengiriman pesan WA ke grup/driver
 const KIRIM_TIMEOUT_MS = 30000;
 const KIRIM_MAX_PERCOBAAN = 3;
+
+// ── Kunci siklus absen ──
+// Google Form kini menyimpan draf jawaban per akun Google. Bila dua siklus
+// (misal /absenmanual + catch-up cron) berjalan bersamaan, kedua sesi saling
+// menimpa draf: halaman ter-reset ke awal, klik diblokir dialog "Progres
+// disimpan", lalu muncul "Waiting for selector ... failed" / "45000ms exceeded".
+// Satu siklus pada satu waktu = syarat wajib agar form terkirim.
+let siklusBerjalan = false;
 
 /**
  * Kirim pesan WA dengan timeout & retry.
@@ -54,6 +72,266 @@ async function _kirimPesanAman(waClient, tujuan, pesan, label = 'pesan') {
 }
 
 /**
+ * Ambil pesan validasi Google Form (mis. "Ini adalah pertanyaan wajib diisi")
+ * agar alasan kegagalan di laporan WA jelas, bukan sekadar "timeout".
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<string|null>}
+ */
+async function _cariErrorWajib(page) {
+    try {
+        return await page.evaluate(() => {
+            const pesan = [...document.querySelectorAll('[role="alert"]')]
+                .map(e => (e.innerText || '').trim())
+                .filter(Boolean);
+            return pesan.length ? pesan.slice(0, 3).join(' | ') : null;
+        });
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Jeda agar JavaScript Google Drive di dalam picker selesai memasang listener. */
+const JEDA_PICKER_SIAP_MS = 12000;
+
+/** Batas tunggu sampai nama file muncul di bagian "Upload Foto". */
+const TIMEOUT_UPLOAD_MS = 60000;
+
+/** Berapa kali seluruh proses buka-picker → upload diulang bila gagal. */
+const MAX_PERCOBAAN_UPLOAD = 3;
+
+/**
+ * Baca ringkasan bagian pertanyaan "Upload Foto" pada halaman form.
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<string>}
+ */
+function _bacaBagianUpload(page) {
+    return page
+        .evaluate(() => {
+            const sec = [...document.querySelectorAll('div[role="listitem"]')].find((e) =>
+                /upload foto/i.test(e.innerText || '')
+            );
+            return sec ? sec.innerText.replace(/\s+/g, ' ').trim() : '';
+        })
+        .catch(() => '');
+}
+
+/**
+ * Buang file sisa draf di pertanyaan "Upload Foto".
+ *
+ * Form hanya menerima 1 file. Kalau draf Google masih menyimpan lampiran dari
+ * absen sebelumnya, upload baru ditolak diam-diam tanpa pesan error.
+ *
+ * @param {import('puppeteer').Page} page
+ */
+async function _hapusBerkasDraf(page) {
+    const adaYangDihapus = await page
+        .evaluate(() => {
+            const sec = [...document.querySelectorAll('div[role="listitem"]')].find((e) =>
+                /upload foto/i.test(e.innerText || '')
+            );
+            if (!sec) return false;
+            const tombol = [...sec.querySelectorAll('div[role="button"], button')].find((b) =>
+                /hapus file|remove file/i.test(b.getAttribute('aria-label') || '')
+            );
+            if (!tombol) return false;
+            tombol.click();
+            return true;
+        })
+        .catch(() => false);
+
+    if (adaYangDihapus) await delay(3000);
+    return adaYangDihapus;
+}
+
+/**
+ * Tutup jendela picker Google Drive sampai benar-benar hilang.
+ *
+ * Selama iframe picker masih menempel, overlay-nya menutupi tombol
+ * "Berikutnya" sehingga klik halaman berikutnya tidak pernah kena.
+ *
+ * @param {import('puppeteer').Page} page
+ */
+async function _tutupPicker(page) {
+    await page
+        .evaluate(() => {
+            const frame = document.querySelector('iframe[src*="picker"]');
+            const dialog = frame && (frame.closest('div[role="dialog"]') || frame.parentElement);
+            const tombol = [...document.querySelectorAll('div[role="button"], button')].find((b) =>
+                /tutup pemilih|tutup|close/i.test(b.getAttribute('aria-label') || '')
+            );
+            if (tombol) tombol.click();
+            if (dialog) dialog.remove();
+        })
+        .catch(() => { /* picker bisa sudah hilang */ });
+
+    for (let i = 0; i < 8; i++) {
+        await delay(1000);
+        if (!page.frames().some((f) => f.url().includes('picker'))) break;
+        if (i === 2) await page.keyboard.press('Escape').catch(() => {});
+        if (i === 5) {
+            await page
+                .evaluate(() => {
+                    document.querySelectorAll('iframe[src*="picker"]').forEach((f) => {
+                        const box = f.closest('div[role="dialog"]') || f.parentElement;
+                        (box || f).remove();
+                    });
+                })
+                .catch(() => {});
+        }
+    }
+}
+
+/**
+ * Upload berkas screenshot ke pertanyaan "Upload Foto".
+ *
+ * Picker Google Drive memakai <input type="file"> tersembunyi di dalam iframe
+ * `docs.google.com/picker`. Input itu sudah ada di DOM beberapa detik SEBELUM
+ * skrip Drive selesai memasang event listener-nya. Kalau `uploadFile()`
+ * dipanggil pada jendela itu, berkas masuk ke input tapi tidak ada yang
+ * memprosesnya: tidak ada permintaan upload, tidak ada pesan error, dan picker
+ * menggantung terbuka sampai alur berikutnya kena timeout 45 detik.
+ *
+ * Uji coba langsung ke form: tanpa jeda 0/2 percobaan berhasil, dengan jeda
+ * 12 detik 4/4 berhasil. Karena itu di sini ditunggu dulu sampai picker siap,
+ * baru berkas dikirim, dan seluruh proses diulang bila masih gagal.
+ *
+ * Tombol "Upload" di dalam picker hanyalah tab navigasi, bukan tombol
+ * konfirmasi — jadi bukti keberhasilan adalah munculnya nama file di bagian
+ * "Upload Foto" pada halaman form, bukan tertutupnya picker.
+ *
+ * @param {import('puppeteer').Page} page
+ * @param {string} filePath
+ * @param {Object} driver
+ */
+async function _uploadBerkas(page, filePath, driver) {
+    const namaFile = path.basename(filePath);
+
+    for (let percobaan = 1; percobaan <= MAX_PERCOBAAN_UPLOAD; percobaan++) {
+        if (await _hapusBerkasDraf(page)) {
+            logger.info(driver.nama, 'Lampiran sisa draf dibuang sebelum upload.');
+        }
+
+        await klikTombolTeks(page, 'Tambahkan file', 'Add file');
+
+        let frameUpload = null;
+        for (let i = 0; i < 20 && !frameUpload; i++) {
+            await delay(1500);
+            for (const f of page.frames()) {
+                if (!f.url().includes('picker')) continue;
+                const siap = await f
+                    .evaluate(
+                        () =>
+                            document.querySelector('input[type="file"]') &&
+                            [...document.querySelectorAll('div[role="button"], button')].some((b) =>
+                                /jelajah|browse/i.test(b.innerText || '')
+                            )
+                    )
+                    .catch(() => false);
+                if (siap) { frameUpload = f; break; }
+            }
+        }
+
+        if (!frameUpload) {
+            logger.warn(driver.nama, `Jendela upload tidak muncul (percobaan ${percobaan}/${MAX_PERCOBAAN_UPLOAD}).`);
+            await _tutupPicker(page);
+            continue;
+        }
+
+        // Beri waktu skrip Drive memasang listener sebelum berkas dikirim.
+        await delay(JEDA_PICKER_SIAP_MS);
+
+        const fileInput = await frameUpload.$('input[type="file"]').catch(() => null);
+        if (!fileInput) {
+            logger.warn(driver.nama, `Kolom upload hilang (percobaan ${percobaan}/${MAX_PERCOBAAN_UPLOAD}).`);
+            await _tutupPicker(page);
+            continue;
+        }
+
+        await fileInput.uploadFile(filePath);
+
+        let berhasil = false;
+        const batas = Date.now() + TIMEOUT_UPLOAD_MS;
+        while (Date.now() < batas) {
+            await delay(2500);
+            if ((await _bacaBagianUpload(page)).includes(namaFile)) { berhasil = true; break; }
+        }
+
+        if (berhasil) {
+            logger.success(driver.nama, `Berkas "${namaFile}" berhasil terupload.`);
+            await _tutupPicker(page);
+            await tutupDialogGangguan(page);
+            return;
+        }
+
+        logger.warn(driver.nama, `Upload belum tercatat (percobaan ${percobaan}/${MAX_PERCOBAAN_UPLOAD}), mengulang...`);
+        await _tutupPicker(page);
+    }
+
+    throw new Error(
+        `Upload "${namaFile}" gagal setelah ${MAX_PERCOBAAN_UPLOAD} percobaan. ` +
+        'Google Drive menolak menerima berkas — periksa koneksi VPS atau kuota Drive akun ini.'
+    );
+}
+
+/**
+ * Centang semua pernyataan pada halaman Pakta Integritas.
+ *
+ * Halaman ini bisa memakai radio ("Benar Saya ...") maupun checkbox, dan
+ * jumlah pernyataannya bisa lebih dari satu. Versi lama hanya mengklik satu
+ * radio lalu lanjut tanpa memeriksa hasilnya, sehingga ketika klik meleset
+ * form menolak submit tanpa petunjuk apa pun.
+ *
+ * @param {import('puppeteer').Page} page
+ * @param {Object} driver
+ */
+async function _tandaTanganPakta(page, driver) {
+    const pilih = () =>
+        page.evaluate(() => {
+            const kandidat = [
+                ...document.querySelectorAll('div[role="radio"], div[role="checkbox"]'),
+            ].filter((el) => {
+                const label = el.getAttribute('aria-label') || '';
+                return /benar saya|saya setuju|setuju|ya, saya|bersedia/i.test(label);
+            });
+
+            let diklik = 0;
+            for (const el of kandidat) {
+                if (el.getAttribute('aria-checked') === 'true') continue;
+                el.click();
+                diklik++;
+            }
+
+            return {
+                total: kandidat.length,
+                diklik,
+                tercentang: kandidat.filter((el) => el.getAttribute('aria-checked') === 'true').length,
+                label: kandidat.map((el) => el.getAttribute('aria-label')),
+            };
+        });
+
+    let hasil = await pilih();
+    if (hasil.total === 0) {
+        logger.warn(driver.nama, 'Tidak ada pernyataan Pakta Integritas yang terdeteksi.');
+        return;
+    }
+
+    for (let i = 0; i < 3 && hasil.tercentang < hasil.total; i++) {
+        await delay(1500);
+        await tutupDialogGangguan(page);
+        hasil = await pilih();
+    }
+
+    if (hasil.tercentang < hasil.total) {
+        throw new Error(
+            `Pakta Integritas gagal ditandatangani (${hasil.tercentang}/${hasil.total} tercentang).`
+        );
+    }
+
+    logger.info(driver.nama, `Pakta Integritas ditandatangani (${hasil.tercentang}/${hasil.total}).`);
+    await delay(1500);
+}
+
+/**
  * Isi Google Form untuk satu driver
  * @param {Object} waClient - WhatsApp client instance
  * @param {Object} driver - Data driver
@@ -70,6 +348,9 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
     const ringkasanAI = generasiRingkasanAI(driver, isLibur);
     const progress = new ProgressTracker(waClient, liveMsgObj, driver, isLibur, options.chatId || null);
 
+    // Akun yang saldonya dipotong — dipakai untuk refund bila absen gagal.
+    let akunTerpotong = null;
+
     try {
         // ══ STAGE 0: Validasi file & saldo ══
         await progress.update(0, 'Mengecek kesiapan file & saldo akun...');
@@ -81,6 +362,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
                 await progress.finish(`🚫 *DIBATALKAN — SALDO KOSONG*\n_${chargeResult.error}_`);
                 return { status: 'GAGAL', alasan: chargeResult.error, statusKerja: '-', ringkasanAI, alasanSaldo: true };
             }
+            akunTerpotong = chargeResult.userId || null;
         }
 
         const cookiePath = db.getCookiePath(driver);
@@ -93,10 +375,12 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
             throw new Error(`Media file SS reaksi kosong: ${driver.fileSS}`);
         }
 
-        // Buat copy temporary screenshot dengan nama Android-style
+        // Buat copy temporary screenshot dengan nama Android-style.
+        // Disimpan di folder .tmp terpisah agar foto asli driver tidak pernah
+        // ikut terhapus oleh pembersihan otomatis.
         if (!isLibur) {
-            const tempName = generateNamaScreenshot();
-            tempScreenshotPath = path.join(config.screenshotDir, tempName);
+            fs.mkdirSync(config.tempScreenshotDir, { recursive: true });
+            tempScreenshotPath = path.join(config.tempScreenshotDir, generateNamaScreenshot());
             fs.copyFileSync(ssPath, tempScreenshotPath);
         }
 
@@ -110,10 +394,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         // ══ STAGE 2: Buka Google Form ══
         await progress.update(2, 'Menghubungi server Google Form utama...');
-        await page.goto(settings.getFormUrl(), {
-            waitUntil: 'networkidle2',
-            timeout: config.formTimeout,
-        });
+        await bukaHalaman(page, settings.getFormUrl(), config.formTimeout);
 
         // Cek apakah redirect ke login (cookie expired)
         if (page.url().includes('ServiceLogin') || page.url().includes('accounts.google.com/v3/signin') || page.url().includes('accounts.google.com/signin')) {
@@ -122,17 +403,30 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         // ── Page 1: Checkbox Email ──
         await progress.update(2, '[STAGE 1/4] Sinkronisasi Checkbox Email...');
+        await tutupDialogGangguan(page);
         const chkEmail = await page.$('div[role="checkbox"]');
         if (chkEmail) {
             const isChecked = await page.evaluate(el => el.getAttribute('aria-checked'), chkEmail);
-            if (isChecked !== 'true') await chkEmail.click();
+            if (isChecked !== 'true') {
+                try {
+                    await chkEmail.click();
+                } catch (e) {
+                    await tutupDialogGangguan(page);
+                    await page.evaluate(el => el.click(), chkEmail);
+                }
+            }
         }
         await klikTombolTeks(page, 'Berikutnya', 'Next');
         await delay(4000);
 
         // ── Page 2: Kredensial Profil ──
         await progress.update(3, '[STAGE 2/4] Mengetik Kredensial Profil...');
-        await page.waitForSelector('input[type="text"]', { timeout: 15000 });
+        await tutupDialogGangguan(page);
+        try {
+            await page.waitForSelector('input[type="text"]', { timeout: 20000 });
+        } catch (e) {
+            throw new Error('Halaman identitas driver tidak terbuka. Google Form kemungkinan menahan sesi karena ada draf dari proses lain yang berjalan bersamaan.');
+        }
         const textInputsP2 = await page.$$('input[type="text"]');
 
         if (textInputsP2.length < 2) {
@@ -144,8 +438,9 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         // Pilih radio: Bekerja / Libur
         const labelKerja = isLibur ? 'Libur' : 'Bekerja';
-        const rdoKerja = await page.$(`div[aria-label="${labelKerja}"]`);
-        if (rdoKerja) await rdoKerja.click();
+        if (!await klikAriaLabel(page, [labelKerja])) {
+            throw new Error(`Form berubah: opsi status "${labelKerja}" tidak ditemukan.`);
+        }
 
         await klikTombolTeks(page, 'Berikutnya', 'Next');
 
@@ -153,12 +448,22 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         if (isLibur) {
             await progress.update(4, 'Mengonfirmasi opsi libur & Mengirimkan form...');
             await delay(3000);
+            await tutupDialogGangguan(page);
             await klikTombolTeks(page, 'Kirim', 'Submit');
-            await delay(6000);
 
-            const currentUrl = page.url();
-            if (!currentUrl.includes('formResponse')) {
-                throw new Error('Gagal memverifikasi pengiriman libur: Halaman Google Form tidak beralih ke halaman sukses.');
+            try {
+                await page.waitForFunction(
+                    () => location.href.includes('formResponse') ||
+                        /jawaban anda telah direkam|your response has been recorded/i.test(document.body.innerText),
+                    { timeout: 30000 }
+                );
+            } catch (e) {
+                const pesanWajib = await _cariErrorWajib(page);
+                throw new Error(
+                    pesanWajib
+                        ? `Form menolak pengiriman libur: ${pesanWajib}`
+                        : 'Gagal memverifikasi pengiriman libur: Halaman Google Form tidak beralih ke halaman sukses.'
+                );
             }
 
             await progress.update(4, '🚀 Form Sukses Terkirim!');
@@ -169,6 +474,19 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         // ── Page 3: Data K3 Fatigue ──
         await progress.update(3, '[STAGE 3/4] Mengisi K3 Fatigue & Pengukuran Reaksi...');
         await delay(4000);
+        await tutupDialogGangguan(page);
+
+        // Pastikan benar-benar sudah di halaman Fatigue, bukan masih di halaman
+        // identitas karena klik "Berikutnya" tertelan dialog draf.
+        try {
+            await page.waitForFunction(
+                () => !!document.querySelector('div[aria-label="Tidak"]'),
+                { timeout: 20000 }
+            );
+        } catch (e) {
+            throw new Error('Halaman K3 Fatigue tidak terbuka. Proses kemungkinan bentrok dengan siklus absen lain pada akun yang sama.');
+        }
+
         const textInputsP3 = await page.$$('input[type="text"]');
 
         if (textInputsP3.length < 2) {
@@ -178,64 +496,18 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         await ketikAman(page, textInputsP3[0], driver.usia);
 
         // Radio: Tidak (kelelahan)
-        const rdoTidak = await page.$('div[aria-label="Tidak"]');
-        if (rdoTidak) await rdoTidak.click();
+        await klikAriaLabel(page, ['Tidak']);
 
         // Radio: Istirahat > 6 jam
-        const rdoIstirahat =
-            await page.$('div[aria-label="Lebih dari 6 Jam"]') ||
-            await page.$('div[aria-label="Lebih dari 6 jam"]');
-        if (rdoIstirahat) await rdoIstirahat.click();
+        await klikAriaLabel(page, ['Lebih dari 6 Jam', 'Lebih dari 6 jam']);
 
         // Input reaksi
         await ketikAman(page, textInputsP3[1], driver.reaksi);
 
         // ── Upload Screenshot ──
         await progress.update(4, '📥 Upload berkas SS reaksi harian...');
-        await klikTombolTeks(page, 'Tambahkan file', 'Add file');
-
-        // Tunggu picker frame muncul
-        let frameUpload = null;
-        for (let i = 0; i < 10; i++) {
-            await delay(1500);
-            for (const f of page.frames()) {
-                if (f.url().includes('picker')) {
-                    frameUpload = f;
-                    break;
-                }
-            }
-            if (frameUpload) break;
-        }
-
-        if (frameUpload) {
-            await frameUpload.waitForSelector('input[type="file"]', { timeout: 10000 });
-            const fileInput = await frameUpload.$('input[type="file"]');
-
-            if (fileInput) {
-                const uploadPath = tempScreenshotPath || ssPath;
-                await fileInput.uploadFile(uploadPath);
-                await delay(5000);
-
-                // Klik tombol Upload/Sisipkan di picker
-                await frameUpload.evaluate(() => {
-                    const btns = Array.from(document.querySelectorAll('div[role="button"]'));
-                    const upBtn = btns.find(b =>
-                        b.innerText &&
-                        (b.innerText.toLowerCase().includes('upload') ||
-                            b.innerText.toLowerCase().includes('pilih') ||
-                            b.innerText.toLowerCase().includes('sisipkan'))
-                    );
-                    if (upBtn) upBtn.click();
-                });
-                await delay(15000); // Tunggu upload selesai
-            }
-        } else {
-            logger.warn(driver.nama, 'Frame picker tidak ditemukan, skip upload.');
-        }
-
-        // Tutup picker jika masih terbuka
-        await page.keyboard.press('Escape');
-        await delay(1500);
+        const uploadPath = tempScreenshotPath || ssPath;
+        await _uploadBerkas(page, uploadPath, driver);
 
         // Next ke halaman terakhir
         await klikTombolTeks(page, 'Berikutnya', 'Next');
@@ -243,17 +515,45 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         // ── Page 4: Pakta Integritas ──
         await progress.update(4, '[STAGE 4/4] Menandatangani lembar Pakta Integritas...');
-        const rdoSetuju = await page.$('div[aria-label*="Benar Saya"]');
-        if (rdoSetuju) await rdoSetuju.click();
+        await tutupDialogGangguan(page);
+
+        // Pastikan halaman terakhir benar-benar terbuka. Kalau upload gagal
+        // diam-diam, form menahan kita di halaman K3 dan klik "Kirim" di bawah
+        // tidak akan pernah ketemu tombolnya.
+        try {
+            await page.waitForFunction(
+                () => [...document.querySelectorAll('div[role="button"]')]
+                    .some(b => /^(kirim|submit)$/i.test((b.innerText || '').trim())),
+                { timeout: 20000 }
+            );
+        } catch (e) {
+            const pesanWajib = await _cariErrorWajib(page);
+            throw new Error(
+                pesanWajib
+                    ? `Form menahan di halaman K3: ${pesanWajib}`
+                    : 'Halaman Pakta Integritas tidak terbuka. Ada data wajib di halaman sebelumnya yang belum lengkap.'
+            );
+        }
+
+        await _tandaTanganPakta(page, driver);
 
         // Submit!
         await klikTombolTeks(page, 'Kirim', 'Submit');
-        await delay(6000);
 
-        // Verifikasi apakah halaman beralih ke halaman respon sukses
-        const currentUrl = page.url();
-        if (!currentUrl.includes('formResponse')) {
-            throw new Error('Gagal memverifikasi pengiriman: Halaman Google Form tidak beralih ke halaman sukses. Silakan cek apakah cookie masih aktif atau ada data wajib yang tidak terisi dengan benar.');
+        // Tunggu halaman sukses alih-alih menebak dengan delay tetap.
+        try {
+            await page.waitForFunction(
+                () => location.href.includes('formResponse') ||
+                    /jawaban anda telah direkam|your response has been recorded/i.test(document.body.innerText),
+                { timeout: 30000 }
+            );
+        } catch (e) {
+            const pesanWajib = await _cariErrorWajib(page);
+            throw new Error(
+                pesanWajib
+                    ? `Form menolak pengiriman: ${pesanWajib}`
+                    : 'Gagal memverifikasi pengiriman: Halaman Google Form tidak beralih ke halaman sukses. Cek cookie atau data wajib yang belum terisi.'
+            );
         }
 
         await progress.update(4, '🚀 Form Sukses Terkirim!');
@@ -264,6 +564,21 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
     } catch (error) {
         logger.error(driver.nama, `Gagal: ${error.message}`);
         await progress.update(4, `💥 Gangguan Sistem: ${error.message}`);
+
+        // Form tidak terkirim = jasa tidak diberikan → kembalikan saldo.
+        // Tanpa ini, setiap retry memotong saldo driver walau absen tidak masuk.
+        if (akunTerpotong) {
+            const r = wallet.mutateBalance(
+                akunTerpotong,
+                config.pricePerAbsen,
+                'REFUND',
+                `Refund absen gagal untuk ${driver.nama}`,
+                { driver: driver.nama, alasan: error.message }
+            );
+            if (r.success) {
+                logger.info('WALLET', `Refund ${config.pricePerAbsen} ke ${akunTerpotong} (absen ${driver.nama} gagal).`);
+            }
+        }
 
         // JIKA COOKIE KEDALUWARSA, KIRIM NOTIFIKASI KHUSUS KE DRIVER DAN ADMIN!
         if (error.message.includes('Cookie kedaluwarsa')) {
@@ -343,7 +658,7 @@ async function _chargeDriver(waClient, driver, liveMsgObj, senderWa = null) {
         // info ke live message bahwa saldo sudah dipotong
         logger.info('WALLET', `Saldo ${user.nama} dipotong ${price} untuk absen ${driver.nama}`);
     }
-    return { success: true };
+    return { success: true, userId };
 }
 
 /**
@@ -410,6 +725,31 @@ async function _kirimAlertCookieExpired(waClient, driver) {
  * @param {{ skipCharge?: boolean }} options - skipCharge: lewati potong saldo (override admin)
  */
 async function prosesAbsenMassal(waClient, targetNama = null, originalMsg = null, options = {}) {
+    // Dua siklus pada waktu yang sama membuat Google Form saling menimpa draf
+    // jawaban → halaman ter-reset & semua driver gagal. Tolak dengan sopan.
+    if (siklusBerjalan) {
+        logger.warn('ABSEN', 'Permintaan absen ditolak: siklus lain masih berjalan.');
+        if (originalMsg) {
+            try {
+                await originalMsg.reply(
+                    `⏳ *PROSES ABSEN SEDANG BERJALAN*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `Sistem masih menyelesaikan siklus absen sebelumnya.\n\n` +
+                    `_Mohon tunggu sampai laporan rekap terkirim, lalu coba lagi._`
+                );
+            } catch (e) { /* abaikan */ }
+        }
+        return { total: 0, suksesCount: 0, gagalCount: 0, rekapLaporan: [], ditolak: true };
+    }
+
+    siklusBerjalan = true;
+    try {
+        return await _prosesAbsenMassal(waClient, targetNama, originalMsg, options);
+    } finally {
+        siklusBerjalan = false;
+    }
+}
+
+async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = null, options = {}) {
     let drivers = db.getAllDrivers();
 
     // Filter jika target spesifik
@@ -586,4 +926,6 @@ INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
 module.exports = {
     isiGoogleForm,
     prosesAbsenMassal,
+    /** @returns {boolean} true bila ada siklus absen yang sedang berjalan */
+    sedangAbsen: () => siklusBerjalan,
 };
