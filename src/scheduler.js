@@ -232,6 +232,95 @@ function _namaPerluUlang(hasil, fallbackNama = null) {
 }
 
 /**
+ * Kumpulkan nomor WA admin yang sedang login, untuk tujuan kiriman cadangan.
+ */
+function _nomorAdmin() {
+    try {
+        const auth = require('./auth');
+        const sesi = bacaJSON(path.join(config.dataDir, 'database_session.json')) || {};
+
+        const idAdmin = new Set(
+            auth.listUsers()
+                .filter((u) => u.role === 'admin')
+                .map((u) => u.id)
+        );
+
+        // Satu admin bisa punya beberapa tautan (@c.us & @lid); @c.us yang
+        // bisa dikirimi pesan, @lid hanya penanda internal WhatsApp.
+        return [...new Set(
+            Object.entries(sesi)
+                .filter(([wa, userId]) => idAdmin.has(userId) && wa.endsWith('@c.us'))
+                .map(([wa]) => wa)
+        )];
+    } catch (e) {
+        logger.warn('BACKUP', `Gagal menentukan admin tujuan: ${e.message}`);
+        return [];
+    }
+}
+
+/**
+ * Buat cadangan harian lalu kirim sebagai dokumen ke admin.
+ * @param {Object} client - WhatsApp client instance
+ */
+async function kirimBackupHarian(client) {
+    try {
+        const { MessageMedia } = require('whatsapp-web.js');
+        const backup = require('./services/backup');
+        const fs = require('fs');
+
+        logger.system('⏰ Cron: membuat cadangan data harian...');
+        const hasil = await backup.buatBackup({ alasan: 'cadangan harian' });
+        const ukuran = backup._ukuranTerbaca(hasil.ukuran);
+        const r = hasil.ringkasan;
+
+        const keterangan =
+            `💾 *CADANGAN HARIAN*\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `📦 ${hasil.nama}\n` +
+            `📏 ${ukuran}\n\n` +
+            `👤 User: *${r.user}*  🚚 Driver: *${r.driver}*\n` +
+            `💰 Saldo total: *Rp ${r.totalSaldo.toLocaleString('id-ID')}*\n` +
+            `🍪 Cookie: *${r.cookie}*  🖼️ Foto: *${r.foto}*\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `_Simpan berkas ini untuk pemulihan saat ganti VPS._`;
+
+        const tujuan = _nomorAdmin();
+        if (!tujuan.length) {
+            logger.warn('BACKUP', 'Cadangan harian dibuat, tapi tidak ada admin login untuk dikirimi.');
+            return;
+        }
+
+        if (hasil.ukuran > backup.MAKS_UKURAN_KIRIM_WA) {
+            for (const wa of tujuan) {
+                await client.sendMessage(wa,
+                    `${keterangan}\n\n⚠️ Berkas terlalu besar untuk WhatsApp.\nAmbil manual: \`${hasil.berkas}\``);
+            }
+            return;
+        }
+
+        const media = new MessageMedia(
+            'application/gzip',
+            fs.readFileSync(hasil.berkas).toString('base64'),
+            hasil.nama
+        );
+
+        for (const wa of tujuan) {
+            try {
+                await client.sendMessage(wa, media, {
+                    sendMediaAsDocument: true,
+                    caption: keterangan,
+                });
+                logger.success('BACKUP', `Cadangan harian terkirim ke ${wa}.`);
+            } catch (e) {
+                logger.error('BACKUP', `Gagal mengirim cadangan ke ${wa}: ${e.message}`);
+            }
+        }
+    } catch (e) {
+        logger.error('BACKUP', `Cadangan harian gagal: ${e.message}`);
+    }
+}
+
+/**
  * Inisialisasi cron job untuk absen otomatis harian
  * @param {Object} client - WhatsApp client instance
  */
@@ -294,7 +383,20 @@ function initScheduler(client) {
         timezone: timezone,
     });
 
+    // ── Cadangan harian & kirim ke admin ──
+    if (config.backupEnabled) {
+        cron.schedule(config.backupSchedule, () => {
+            kirimBackupHarian(client);
+        }, {
+            scheduled: true,
+            timezone: timezone,
+        });
+    }
+
     logger.success('SCHEDULER', `Cron aktif: "${schedule}" (${timezone}), catch-up tiap ${CATCHUP_INTERVAL_MS / 60000} menit & pembersihan harian (00:00).`);
+    if (config.backupEnabled) {
+        logger.success('SCHEDULER', `Cadangan otomatis aktif: "${config.backupSchedule}" (${timezone}).`);
+    }
 }
 
-module.exports = { initScheduler, jalankanAbsenOtomatis };
+module.exports = { initScheduler, jalankanAbsenOtomatis, kirimBackupHarian };

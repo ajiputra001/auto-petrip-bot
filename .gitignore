@@ -5,6 +5,7 @@ sessions/
 data/*.json
 cookies/
 screenshots/
+backups/
 *.log
 logs/
 .env.local

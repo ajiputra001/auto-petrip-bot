@@ -23,6 +23,7 @@ const {
     handleLinkDriverUser, handleIdGrup, handleListGrup,
 } = require('./admin');
 const { showAdminMenu, handleAdminInput, clearAdminState } = require('./admin-ui');
+const { handleBackup, handleRestore, handleListBackup } = require('./backup');
 
 /**
  * Daftar semua perintah resmi untuk kecerdasan rekomendasi typo
@@ -36,7 +37,8 @@ const KNOWN_COMMANDS = [
     '/daftar', '/login', '/logout', '/saldo', '/topup', '/riwayat', '/linkakun', '/linkdriver',
     '/admin', '/listuser', '/aktifkan', '/nonaktifkan', '/setadmin', '/adminreset', '/adjust', '/orderlist', '/adminstat',
     '/setform', '/getform', '/resetform', '/absenkan', '/absenkansemua', '/linkdriveruser',
-    '/idgrup', '/listgrup'
+    '/idgrup', '/listgrup',
+    '/backup', '/restore', '/listbackup'
 ];
 
 /**
@@ -96,6 +98,11 @@ const ROUTES = [
     { match: (cmd) => cmd === '/absenkansemua',                             handler: handleAbsenkanSemua },
     { match: (cmd) => cmd.startsWith('/absenkan ') || cmd === '/absenkan',  handler: handleAbsenkan },
     { match: (cmd) => cmd.startsWith('/linkdriveruser ') || cmd === '/linkdriveruser', handler: handleLinkDriverUser },
+
+    // Backup & Restore
+    { match: (cmd) => cmd === '/backup',                                    handler: handleBackup },
+    { match: (cmd) => cmd === '/listbackup',                                handler: handleListBackup },
+    { match: (cmd) => cmd.startsWith('/restore ') || cmd === '/restore',    handler: handleRestore },
 ];
 
 // ── Anti-Duplikat: Cache ID pesan yang sudah diproses ──

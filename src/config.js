@@ -37,6 +37,10 @@ const config = {
     cronSchedule: process.env.CRON_SCHEDULE || '0 8 * * *',
     cronTimezone: process.env.CRON_TIMEZONE || 'Asia/Jakarta',
 
+    // ── Cadangan Otomatis ──
+    backupEnabled: String(process.env.BACKUP_ENABLED || 'true').toLowerCase() !== 'false',
+    backupSchedule: process.env.BACKUP_SCHEDULE || '0 22 * * *',
+
     // ── Browser ──
     chromePath: detectChromePath(),
     browserTimeout: parseInt(process.env.BROWSER_TIMEOUT) || 180000,

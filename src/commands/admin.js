@@ -49,6 +49,9 @@ async function handleAdminMenu(msg) {
     teks += `🚚 \`/absenkan [Nama|email]\` — Absen manual atas nama driver\n`;
     teks += `🆓 \`/absenkan [Nama] gratis\` — Absen tanpa potong saldo\n`;
     teks += `👥 \`/absenkansemua\` — Absen semua driver (tanpa potong saldo)\n`;
+    teks += `💾 \`/backup\` — Cadangkan data & kirim ke WA\n`;
+    teks += `📦 \`/listbackup\` — Daftar cadangan di VPS\n`;
+    teks += `♻️ \`/restore\` — Pulihkan data (lampirkan berkas cadangan)\n`;
     teks += `━━━━━━━━━━━━━━━━━━━━━━`;
     return msg.reply(teks);
 }

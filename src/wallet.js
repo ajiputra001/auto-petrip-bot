@@ -88,6 +88,14 @@ function mutateBalance(userId, amount, type, description, meta = {}) {
     _writeWallets(wallets);
 
     logger.info('WALLET', `[${userId}] ${type} ${delta >= 0 ? '+' : ''}${delta} → saldo ${newBalance}`);
+
+    // Saldo masuk/penyesuaian paling mahal bila hilang saat ganti VPS, jadi
+    // dicadangkan otomatis. Potongan & refund absen dilewati karena rutin
+    // terjadi setiap hari dan sudah tercakup cadangan harian.
+    if (type === 'TOPUP' || type === 'ADJUST' || type === 'BONUS') {
+        require('./services/backup').jadwalkanBackupOtomatis(`saldo ${type}`);
+    }
+
     return { success: true, balance: newBalance, transaction };
 }
 
