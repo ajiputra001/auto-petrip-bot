@@ -4,6 +4,7 @@
 
 const { delay } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const { kartu, tebal, miring, cabang } = require('../utils/tampilan');
 
 /**
  * Class untuk mengelola live progress update di WhatsApp
@@ -74,23 +75,29 @@ class ProgressTracker {
             'Unggah SS Reaksi & Tanda Tangan'
         ];
 
-        let template = `╔════════════════════════════╗\n`;
-        template += `      🤖 *AJIPUTRA AUTOMATION ENGINE v1.0*     \n`;
-        template += `          🛰️ *LIVE TELEMETRY STREAM*          \n`;
-        template += `╚════════════════════════════╝\n\n`;
-        template += `👤 *Driver*    : *${this.driver.nama.toUpperCase()}*\n`;
-        template += `🆔 *ID Reg*    : \`${this.driver.id}\`\n`;
-        template += `📅 *Rencana*   : ${this.isLibur ? '🏖️ Libur Operasional' : '🚚 Masuk Kerja'}\n`;
-        template += `⏱️ *Durasi*    : \`${durasi} detik\`\n`;
-        template += `📊 *Progress*  : *[${bar}] ${persen}%*\n`;
-        template += `⚙️ *Aktivitas* : _${deskripsi}_\n\n`;
-        template += `📋 *DETAIL TELEMETRY STAGE:*\n`;
-        template += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        const langkah = [];
         for (let s = 0; s <= 4; s++) {
-            template += `${statusIcon(s)} Stage ${s}: ${stagesList[s]}\n`;
+            langkah.push(`${statusIcon(s)} ${stagesList[s]}`);
         }
-        template += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        template += `🖥️ System: Powered By Ajiputra-tech`;
+
+        const template = kartu({
+            judul: `🤖 *AUTOBOT — PROSES ABSEN*`,
+            isi: [
+                `👤 ${tebal(this.driver.nama)}`,
+                cabang([
+                    `🆔 ID Reg: ${this.driver.id}`,
+                    `📅 Rencana: ${this.isLibur ? '🏖️ libur operasional' : '🚚 masuk kerja'}`,
+                    `⏱️ Berjalan: ${durasi} detik`,
+                ]),
+                ``,
+                `📊 ${tebal(`[${bar}] ${persen}%`)}`,
+                `⚙️ ${miring(deskripsi)}`,
+                ``,
+                `📋 *Tahapan*`,
+                cabang(langkah),
+            ],
+            kaki: [`🖥️ ${miring('Powered by Ajiputra-tech')}`],
+        });
 
         await this._editPesan(template);
         await delay(1200); // Delay aman pelolosan rate-limit WA

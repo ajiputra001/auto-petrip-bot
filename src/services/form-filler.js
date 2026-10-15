@@ -8,6 +8,7 @@ const config = require('../config');
 const db = require('../database');
 const logger = require('../utils/logger');
 const { delay, generateNamaScreenshot, hapusFileAman, formatRupiah, withTimeout } = require('../utils/helpers');
+const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
 const {
     launchBrowser,
     tutupBrowser,
@@ -666,23 +667,28 @@ async function _chargeDriver(waClient, driver, liveMsgObj, senderWa = null) {
  */
 async function _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, chatId = null) {
     const waktu = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-    const disclaimer = `\n\n📌 *Disclaimer :*\nHarap Untuk Mengecek Email Dari Hasil  Laporan Setiap Hari.
-Dan Tidak ada paksaan untuk menggunakan project autobot ini .
-Robot ini di ciptakan hanya untuk meringankan kerjaan para pengguna sehari-hari .
-INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
+    const disclaimer = '\n\n' + [
+        `📌 *Disclaimer*`,
+        `Mohon tetap cek email laporan Anda setiap hari.`,
+        `Bot ini dibuat untuk meringankan pekerjaan harian, bukan paksaan.`,
+        `⚠️ Namanya robot, sewaktu-waktu bisa saja keliru atau error.`,
+    ].join('\n');
 
-    let pesan = `✅ *REPORT AUTO-PETRIP (AJIPUTRA PROJECT)* ✅\n`;
-    pesan += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    pesan += `🗂️ *STATUS* : 🟢 *BERHASIL TERKIRIM*\n`;
-    pesan += `⏱️ *WAKTU* : ${waktu}\n\n`;
-    pesan += `*👤 IDENTIFIKASI DRIVER*\n`;
-    pesan += `• Nama   : *${driver.nama}*\n`;
-    pesan += `• ID Reg : ${driver.id}\n`;
-    pesan += `• Mode   : ${isLibur ? 'Libur 🏖️' : 'Masuk Kerja 🚚'}\n\n`;
-    pesan += `🧠 *CORE ANALYTIC Autobot SUMMARY*\n`;
-    pesan += `_${ringkasanAI}_\n`;
-    pesan += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    pesan += `🤖 _System Powered by Ajiputra-tech v1.0_${disclaimer}`;
+    const pesan = kartu({
+        judul: `✅ *ABSEN BERHASIL TERKIRIM*`,
+        isi: [
+            `👤 ${tebal(driver.nama)}`,
+            cabang([
+                `🆔 ID Reg: ${driver.id}`,
+                `📅 Mode: ${isLibur ? '🏖️ libur' : '🚚 masuk kerja'}`,
+                `⏱️ Waktu: ${waktu}`,
+            ]),
+            ``,
+            `🧠 *Ringkasan*`,
+            miring(ringkasanAI),
+        ],
+        kaki: [`🤖 ${miring('Powered by Ajiputra-tech')}${disclaimer}`],
+    });
 
     for (const tujuan of _tujuanLaporan(chatId)) {
         await _kirimPesanAman(waClient, tujuan, pesan, `laporan ${driver.nama}`);
@@ -705,9 +711,40 @@ function _tujuanLaporan(chatId) {
  * Kirim alert ketika cookie kedaluwarsa ke Driver & Admin
  */
 async function _kirimAlertCookieExpired(waClient, driver) {
-    const adminMsg = `⚠️ *SISTEM PERINGATAN COOKIE* ⚠️\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n❌ *Cookie Kedaluwarsa*: *${driver.nama.toUpperCase()}*\n🆔 ID: ${driver.id}\n\nSistem otomatisasi terhenti untuk driver ini karena sesi Google Account telah kedaluwarsa.\n\nMohon hubungi driver bersangkutan atau perbarui file cookie.`;
+    const depan = driver.nama.split(' ')[0];
 
-    const driverMsg = `⚠️ *PERINGATAN SINKRONISASI AKUN* ⚠️\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nHalo *${driver.nama}*,\n\nSesi login Google Account Anda di sistem kami telah *KEDALUWARSA / LOGOUT*.\n\nMohon segera perbarui cookie Anda dengan cara:\n1️⃣ Dapatkan file JSON cookie baru dari browser laptop/HP Anda.\n2️⃣ Kirim file JSON tersebut ke nomor bot ini dengan teks caption:\n\`/updatecookie ${driver.nama.split(' ')[0]}\`\n\n_Sistem tidak dapat mengisi absen otomatis Anda sampai cookie diperbarui._`;
+    const adminMsg = kartu({
+        judul: `⚠️ *COOKIE KEDALUWARSA*`,
+        isi: [
+            `🚚 ${tebal(driver.nama)}`,
+            cabang([
+                `🆔 ID Reg: ${driver.id}`,
+                `🔴 Sesi Google Account sudah logout`,
+            ]),
+            ``,
+            `Absen otomatis driver ini ${tebal('berhenti')} sampai cookie diperbarui.`,
+        ],
+        kaki: [
+            `💡 Perbarui dengan ${kode(`/updatecookie ${depan}`)} + lampirkan JSON.`,
+        ],
+    });
+
+    const driverMsg = kartu({
+        judul: `⚠️ *SESI GOOGLE ANDA HABIS*`,
+        isi: [
+            `Halo ${tebal(driver.nama)},`,
+            ``,
+            `Sesi login Google Account Anda sudah ${tebal('kedaluwarsa')}, sehingga absen otomatis tidak bisa dijalankan.`,
+            ``,
+            `📌 *Cara memperbaiki:*`,
+            cabang([
+                `1️⃣ Ambil file JSON cookie baru dari browser Anda`,
+                `2️⃣ Kirim berkas itu ke bot ini`,
+                `3️⃣ Beri caption: ${kode(`/updatecookie ${depan}`)}`,
+            ]),
+        ],
+        kaki: [`⏳ ${miring('Absen otomatis Anda tertunda sampai cookie diperbarui.')}`],
+    });
 
     if (config.waGrup) {
         await _kirimPesanAman(waClient, config.waGrup, adminMsg, 'alert cookie (grup)');
@@ -871,30 +908,40 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
     // ── Build Rekap Laporan ──
     const tanggal = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
-    let rekap = `╔════════════════════════╗\n`;
-    rekap += `📊*REPORT HARIAN AUTO-PETRIP*📊\n`;
-    rekap += `╚════════════════════════╝\n\n`;
-    rekap += `📅 *Waktu*     : ${tanggal}\n`;
-    rekap += `👥 *Total Data* : ${drivers.length} Driver\n`;
-    rekap += `✅ *Berhasil*   : ${suksesCount}\n`;
-    rekap += `❌ *Gagal*      : ${gagalCount}\n\n`;
-    rekap += `📝 *DAFTAR DRIVER:*\n`;
-    rekap += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    const isi = [
+        cabang([
+            `📅 Waktu: ${tanggal}`,
+            `👥 Total: ${tebal(`${drivers.length} driver`)}`,
+            `✅ Berhasil: ${tebal(suksesCount)}  ·  ❌ Gagal: ${tebal(gagalCount)}`,
+        ]),
+        ``,
+        `📝 *Rincian per driver*`,
+    ];
 
     rekapLaporan.forEach((item, index) => {
-        if (item.status === 'SUKSES') {
-            rekap += ` ${index + 1}. *${item.nama}*\n    └ Status: 100% SUKSES TERKIRIM (${item.statusKerja})\n`;
-        } else {
-            rekap += ` ${index + 1}. *${item.nama}*\n    └ Status: 🟥 GAGAL EKSEKUSI\n    └ Detail: _${item.alasan}_\n`;
-        }
+        if (index > 0) isi.push(``);
+        const sukses = item.status === 'SUKSES';
+        isi.push(`${sukses ? '✅' : '❌'} ${index + 1}. ${tebal(item.nama)}`);
+        isi.push(cabang(sukses
+            ? [`Terkirim 100% (${item.statusKerja})`]
+            : [`Gagal dieksekusi`, `Sebab: ${miring(item.alasan)}`]
+        ));
     });
 
-    rekap += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    rekap += `📌 *Disclaimer :*\n`;
-    rekap += `Harap Untuk Mengecek Email Dari Hasil  Laporan Setiap Hari.
-Dan Tidak ada paksaan untuk menggunakan project autobot ini .
-Robot ini di ciptakan hanya untuk meringankan kerjaan para pengguna sehari-hari .
-INGAT !!! KARNA INI ROBOT ,BISA SAJA SEWAKTU-WAKTU MEMBUAT KESALAHAN/ERROR .`;
+    const rekap = kartu({
+        judul: `📊 *LAPORAN HARIAN AUTO-PETRIP*`,
+        isi,
+        kaki: [
+            gagalCount
+                ? `⚠️ ${tebal(`${gagalCount} driver gagal`)} — cek cookie & saldonya.`
+                : `🎉 ${miring('Semua driver berhasil absen.')}`,
+            ``,
+            `📌 *Disclaimer*`,
+            `Mohon tetap cek email laporan Anda setiap hari.`,
+            `Bot ini dibuat untuk meringankan pekerjaan harian, bukan paksaan.`,
+            `⚠️ Namanya robot, sewaktu-waktu bisa saja keliru atau error.`,
+        ],
+    });
 
     // Kirim ke grup laporan & chat pemicu
     const tujuanRekap = _tujuanLaporan(originalMsg ? targetChatId : null);

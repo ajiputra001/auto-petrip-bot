@@ -9,6 +9,7 @@ const { MessageMedia } = require('whatsapp-web.js');
 const backup = require('../services/backup');
 const { downloadMediaRobust } = require('../utils/media-downloader');
 const logger = require('../utils/logger');
+const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
 
 // Restore menimpa seluruh data, jadi butuh konfirmasi eksplisit.
 // Kunci berisi berkas yang menunggu beserta kedaluwarsanya.
@@ -75,13 +76,13 @@ function _tolak(msg) {
 }
 
 function _ringkasanTeks(r) {
-    return (
-        `👤 User akun   : *${r.user}*\n` +
-        `🚚 Driver      : *${r.driver}*\n` +
-        `💰 Dompet      : *${r.dompet}* (total Rp ${r.totalSaldo.toLocaleString('id-ID')})\n` +
-        `🍪 Cookie      : *${r.cookie}* berkas\n` +
-        `🖼️ Foto driver : *${r.foto}* berkas`
-    );
+    return cabang([
+        `👤 Akun user: ${tebal(r.user)}`,
+        `🚚 Driver: ${tebal(r.driver)}`,
+        `💰 Dompet: ${tebal(r.dompet)} (total Rp ${r.totalSaldo.toLocaleString('id-ID')})`,
+        `🍪 Cookie: ${tebal(r.cookie)} berkas`,
+        `🖼️ Foto driver: ${tebal(r.foto)} berkas`,
+    ]);
 }
 
 /**
@@ -96,23 +97,34 @@ async function handleBackup(msg, pesan, waClient) {
         const hasil = await backup.buatBackup({ alasan: 'perintah /backup' });
         const ukuran = backup._ukuranTerbaca(hasil.ukuran);
 
-        let teks =
-            `✅ *CADANGAN SIAP*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `📦 ${hasil.nama}\n` +
-            `📏 Ukuran: *${ukuran}*\n\n` +
-            `${_ringkasanTeks(hasil.ringkasan)}\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n`;
+        const isi = [
+            `📦 ${kode(hasil.nama)}`,
+            `📏 Ukuran: ${tebal(ukuran)}`,
+            ``,
+            `📋 *Isi cadangan*`,
+            _ringkasanTeks(hasil.ringkasan),
+        ];
 
         if (hasil.ukuran > backup.MAKS_UKURAN_KIRIM_WA) {
-            teks +=
-                `\n⚠️ Berkas terlalu besar untuk dikirim lewat WhatsApp.\n` +
-                `Ambil manual dari VPS:\n\`${hasil.berkas}\``;
-            return msg.reply(teks);
+            return msg.reply(kartu({
+                judul: `⚠️ *CADANGAN TERLALU BESAR*`,
+                isi,
+                kaki: [
+                    `Berkas melebihi batas kirim WhatsApp.`,
+                    `💡 Ambil manual dari VPS:`,
+                    kode(hasil.berkas),
+                ],
+            }));
         }
 
-        teks += `\n💡 Simpan berkas ini. Saat pindah VPS, kirim balik dengan perintah \`/restore\`.`;
-        await msg.reply(teks);
+        await msg.reply(kartu({
+            judul: `✅ *CADANGAN SIAP*`,
+            isi,
+            kaki: [
+                `📎 ${miring('Berkas dikirim menyusul di bawah ini.')}`,
+                `💡 Simpan baik-baik. Saat pindah VPS, kirim balik dengan ${kode('/restore')}.`,
+            ],
+        }));
 
         const media = new MessageMedia(
             'application/gzip',
@@ -142,13 +154,29 @@ async function handleListBackup(msg) {
         return msg.reply('📭 Belum ada cadangan tersimpan.\nBuat sekarang dengan `/backup`.');
     }
 
-    let teks = `📦 *DAFTAR CADANGAN* (${arsip.length})\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    const isi = [];
     arsip.forEach((a, i) => {
-        const waktu = a.waktu.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-        teks += `${i + 1}. ${a.nama}\n    ${backup._ukuranTerbaca(a.ukuran)} — ${waktu}\n`;
+        const waktu = a.waktu.toLocaleString('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            day: 'numeric', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit',
+        });
+        if (i > 0) isi.push(``);
+        isi.push(`${i + 1}. ${kode(a.nama)}`);
+        isi.push(cabang([`📏 ${backup._ukuranTerbaca(a.ukuran)}  ·  📅 ${waktu}`]));
     });
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n_Tersimpan di:_ \`${backup.BACKUP_DIR}\``;
-    return msg.reply(teks);
+
+    const totalUkuran = arsip.reduce((n, a) => n + a.ukuran, 0);
+
+    return msg.reply(kartu({
+        judul: `📦 *DAFTAR CADANGAN* (${arsip.length})`,
+        isi,
+        kaki: [
+            `💾 Total: ${tebal(backup._ukuranTerbaca(totalUkuran))}`,
+            `📂 Tersimpan di: ${kode(backup.BACKUP_DIR)}`,
+            `💡 Kirim ulang arsip dengan ${kode('/restore')} untuk memulihkan.`,
+        ],
+    }));
 }
 
 /**
@@ -186,16 +214,23 @@ async function handleRestore(msg, pesan, waClient) {
             const hasil = await backup.pulihkanBackup(tertunda.berkas);
             const r = hasil.manifest.ringkasan || {};
 
-            await msg.reply(
-                `✅ *PEMULIHAN BERHASIL*\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `📅 Arsip dibuat: ${hasil.manifest.dibuat || '-'}\n` +
-                `📂 Dipulihkan: ${Object.entries(hasil.dipulihkan).map(([k, v]) => `${k} (${v})`).join(', ')}\n\n` +
-                `${r.user !== undefined ? _ringkasanTeks(r) + '\n' : ''}` +
-                `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `🛟 Data lama diamankan sebagai:\n\`${hasil.cadanganSebelum}\`\n\n` +
-                `⚠️ *WAJIB RESTART* agar data baru dimuat:\n\`pm2 restart auto-petrip-bot\``
-            );
+            await msg.reply(kartu({
+                judul: `✅ *PEMULIHAN BERHASIL*`,
+                isi: [
+                    `📅 Arsip dibuat: ${hasil.manifest.dibuat || '-'}`,
+                    ``,
+                    `📂 *Yang dipulihkan*`,
+                    cabang(Object.entries(hasil.dipulihkan).map(([k, v]) => `${k}: ${v}`)),
+                    ...(r.user !== undefined ? [``, `📋 *Isi data*`, _ringkasanTeks(r)] : []),
+                ],
+                kaki: [
+                    `🛟 Data lama diamankan sebagai:`,
+                    kode(hasil.cadanganSebelum),
+                    ``,
+                    `⚠️ ${tebal('WAJIB RESTART')} agar data baru dimuat:`,
+                    kode('pm2 restart auto-petrip-bot'),
+                ],
+            }));
             logger.success('BACKUP', `Data dipulihkan oleh ${msg.from}`);
         } catch (e) {
             logger.error('BACKUP', `Pemulihan gagal: ${e.message}`);
@@ -216,13 +251,20 @@ async function handleRestore(msg, pesan, waClient) {
     // ── Langkah 1: terima berkas ──
     const unduh = await downloadMediaRobust(msg, waClient);
     if (!unduh.success || !unduh.media) {
-        return msg.reply(
-            `📤 *KIRIM BERKAS CADANGAN*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Lampirkan berkas \`backup_autopetrip_*.tar.gz\` bersama perintah \`/restore\`,\n` +
-            `atau balas (reply) berkas yang sudah ada di chat dengan \`/restore\`.\n\n` +
-            `💡 Belum punya? Buat dulu dengan \`/backup\`.`
-        );
+        return msg.reply(kartu({
+            judul: `📤 *KIRIM BERKAS CADANGAN*`,
+            isi: [
+                `Ada dua cara memulihkan data:`,
+                cabang([
+                    `Lampirkan arsip ${kode('.tar.gz')} + perintah ${kode('/restore')}`,
+                    `Balas (reply) arsip yang sudah ada di chat dengan ${kode('/restore')}`,
+                ]),
+            ],
+            kaki: [
+                `💡 Belum punya arsip? Buat dulu dengan ${kode('/backup')}.`,
+                `📦 Lihat arsip di VPS dengan ${kode('/listbackup')}.`,
+            ],
+        }));
     }
 
     const namaAsli = unduh.media.filename || 'backup.tar.gz';
@@ -240,18 +282,26 @@ async function handleRestore(msg, pesan, waClient) {
     let pratinjau = '';
     try {
         const manifest = await _intipManifest(sementara);
-        pratinjau =
-            `📅 Dibuat   : ${manifest.dibuat || '-'}\n` +
-            `🖥️ Dari host: ${manifest.host || '-'}\n\n` +
-            `${manifest.ringkasan ? _ringkasanTeks(manifest.ringkasan) : '_Ringkasan tidak tersedia_'}\n`;
+        pratinjau = [
+            cabang([
+                `📅 Dibuat: ${manifest.dibuat || '-'}`,
+                `🖥️ Dari host: ${manifest.host || '-'}`,
+            ]),
+            ``,
+            `📋 *Isi arsip*`,
+            manifest.ringkasan ? _ringkasanTeks(manifest.ringkasan) : miring('Ringkasan tidak tersedia'),
+        ].join('\n');
     } catch (e) {
         _bersihkanUnggahan(sementara);
-        return msg.reply(
-            `❌ *ARSIP TIDAK VALID*\n` +
-            `Berkas: _${namaAsli}_\n\n` +
-            `_${e.message}_\n\n` +
-            `💡 Kirim arsip \`backup_autopetrip_*.tar.gz\` hasil perintah \`/backup\`.`
-        );
+        return msg.reply(kartu({
+            judul: `❌ *ARSIP TIDAK VALID*`,
+            isi: [
+                `📄 Berkas: ${miring(namaAsli)}`,
+                ``,
+                `🔎 ${miring(e.message)}`,
+            ],
+            kaki: [`💡 Kirim arsip hasil ${kode('/backup')} (${kode('backup_autopetrip_*.tar.gz')}).`],
+        }));
     }
 
     // Permintaan lama (kalau ada) dibatalkan supaya berkasnya tidak menumpuk.
@@ -263,18 +313,24 @@ async function handleRestore(msg, pesan, waClient) {
         timer: _pasangKedaluwarsa(kunci),
     });
 
-    return msg.reply(
-        `⚠️ *KONFIRMASI PEMULIHAN*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📦 ${namaBerkas}\n` +
-        `${pratinjau}` +
-        `━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Data user, saldo, driver, cookie & foto saat ini akan *DITIMPA*.\n` +
-        `_(Data lama tetap diamankan otomatis sebelum ditimpa.)_\n\n` +
-        `✅ Ketik \`/restore ya\` untuk lanjut\n` +
-        `🚫 Ketik \`/restore batal\` untuk membatalkan\n\n` +
-        `_Berlaku 5 menit._`
-    );
+    return msg.reply(kartu({
+        judul: `⚠️ *KONFIRMASI PEMULIHAN*`,
+        isi: [
+            `📦 ${kode(namaBerkas)}`,
+            pratinjau,
+            ``,
+            `Yang akan ${tebal('DITIMPA')} oleh isi arsip:`,
+            cabang(['Akun user & saldo', 'Data driver & jadwal', 'Cookie & foto driver']),
+        ],
+        kaki: [
+            `🛟 ${miring('Data lama diamankan otomatis sebelum ditimpa.')}`,
+            ``,
+            `✅ Lanjut: ${kode('/restore ya')}`,
+            `🚫 Batal: ${kode('/restore batal')}`,
+            ``,
+            `⏳ ${miring('Berlaku 5 menit.')}`,
+        ],
+    }));
 }
 
 /**

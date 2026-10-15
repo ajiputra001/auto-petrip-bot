@@ -9,6 +9,7 @@ const logger = require('./utils/logger');
 const { prosesAbsenMassal, sedangAbsen } = require('./services/form-filler');
 const { bersihkanLogLama, bersihkanZombieChrome } = require('./utils/self-healing');
 const { bacaJSON, tulisJSON, ensureDir, withTimeout } = require('./utils/helpers');
+const { kartu, kode, tebal, miring, cabang } = require('./utils/tampilan');
 
 const STATE_FILE = path.join(config.dataDir, 'scheduler_state.json');
 
@@ -273,16 +274,23 @@ async function kirimBackupHarian(client) {
         const ukuran = backup._ukuranTerbaca(hasil.ukuran);
         const r = hasil.ringkasan;
 
-        const keterangan =
-            `💾 *CADANGAN HARIAN*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `📦 ${hasil.nama}\n` +
-            `📏 ${ukuran}\n\n` +
-            `👤 User: *${r.user}*  🚚 Driver: *${r.driver}*\n` +
-            `💰 Saldo total: *Rp ${r.totalSaldo.toLocaleString('id-ID')}*\n` +
-            `🍪 Cookie: *${r.cookie}*  🖼️ Foto: *${r.foto}*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `_Simpan berkas ini untuk pemulihan saat ganti VPS._`;
+        const keterangan = kartu({
+            judul: `💾 *CADANGAN HARIAN*`,
+            isi: [
+                `📦 ${kode(hasil.nama)}`,
+                `📏 Ukuran: ${tebal(ukuran)}`,
+                ``,
+                `📋 *Isi cadangan*`,
+                cabang([
+                    `👤 Akun user: ${tebal(r.user)}`,
+                    `🚚 Driver: ${tebal(r.driver)}`,
+                    `💰 Saldo total: ${tebal(`Rp ${r.totalSaldo.toLocaleString('id-ID')}`)}`,
+                    `🍪 Cookie: ${tebal(r.cookie)} berkas`,
+                    `🖼️ Foto: ${tebal(r.foto)} berkas`,
+                ]),
+            ],
+            kaki: [`💡 ${miring('Simpan berkas ini untuk pemulihan saat ganti VPS.')}`],
+        });
 
         const tujuan = _nomorAdmin();
         if (!tujuan.length) {

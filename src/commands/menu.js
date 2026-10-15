@@ -56,9 +56,8 @@ async function handleMenu(msg) {
     const { formatRupiah } = require('../utils/helpers');
 
     let teks =
-        `╔════════════════════════╗\n` +
-        `  📊 *AUTOBOT COMMAND CENTER* 📊\n` +
-        `╚════════════════════════╝\n`;
+        `📊 *AUTOBOT COMMAND CENTER*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━\n`;
 
     // Baris status membuat user langsung tahu posisinya tanpa mengetik /saldo.
     if (ctx.login) {
@@ -278,9 +277,8 @@ async function handleBantuan(msg) {
     const config = require('../config');
     const { formatRupiah } = require('../utils/helpers');
 
-    let menu = `╔════════════════════════╗\n`;
-    menu += `  📊 *DAFTAR PERINTAH LENGKAP* 📊\n`;
-    menu += `╚════════════════════════╝\n\n`;
+    let menu = `📖 *DAFTAR PERINTAH LENGKAP*\n`;
+    menu += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     menu += `💡 _Tidak hafal perintah? Ketik_ \`/menu\` _dan balas angka._\n\n`;
 
     menu += `┌─👤 *AKUN & SALDO*\n`;
