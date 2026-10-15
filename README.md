@@ -16,6 +16,8 @@ Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX 
 * **🆕 Web Dashboard**: Halaman login, cek saldo, top-up, dan riwayat transaksi yang responsif (mobile & desktop).
 * **🆕 Cadangan Otomatis & Pindah VPS Sekali Jalan**: Data user, saldo, driver, cookie, dan foto dibungkus jadi satu arsip yang dikirim ke WhatsApp — harian, setiap saldo masuk, dan sebelum setiap pemulihan. Pindah VPS cukup `install.sh --restore`.
 * **🆕 Installer Serba-Otomatis**: Satu perintah memasang paket sistem, Node.js 20, Chrome, swap 4 GB, PM2 + log rotate, auto-start saat reboot, lalu memverifikasi hasilnya.
+* **🆕 Menu Kontekstual & Panel Admin Penuh**: Menu menyesuaikan status pengirim — belum login tidak disuguhi menu saldo, perintah admin disembunyikan dari non-admin. Seluruh fitur admin (termasuk saldo massal, hapus akun, hapus driver, cadangan data) bisa dijalankan hanya dengan membalas angka.
+* **🆕 Saldo Massal**: Isi atau potong saldo banyak akun sekaligus — semua, pilihan (`1,3`), atau rentang (`2-5`). Setiap pemilik akun otomatis diberi tahu saldonya berubah.
 
 ---
 
@@ -202,10 +204,30 @@ npm run dev
 
 ## 💬 Perintah WhatsApp (Command List)
 
+> 💡 **Tidak perlu menghafal apa pun.** Ketik `/menu` dan balas angka. Menunya **kontekstual**: isinya menyesuaikan status Anda — yang belum login tidak disuguhi menu saldo, dan menu admin hanya muncul bagi admin. Jadi tidak ada pilihan yang dipilih lalu ditolak.
+
+```
+📊 AUTOBOT COMMAND CENTER
+👤 Ajiputra-tech (Admin) 🛡️ admin
+💰 Saldo: Rp 5.000  ·  🚚 Agung maulana
+
+ 1️⃣ 💰 Akun & Saldo           → saldo, top-up, riwayat, tautkan driver, logout
+ 2️⃣ 🚀 Absen & Jadwal         → absen sekarang, atur/batalkan libur, cek kesiapan
+ 3️⃣ 👤 Data Driver & Media    → tambah/edit driver, update foto & cookie
+ 4️⃣ ⚙️ Sistem & Info          → status server, link form, ID grup, cadangkan data
+ 5️⃣ 🛡️ Panel Admin            ← hanya tampil untuk admin
+ 9️⃣ ❓ Daftar Perintah Lengkap
+```
+
+Baris atas langsung menunjukkan siapa Anda, sisa saldo, dan driver yang tertaut — tanpa perlu mengetik `/saldo` dulu. Bila belum login, menunya berubah jadi ajakan masuk/daftar.
+
+Menu yang butuh parameter (tambah driver, atur libur, top-up) **menanyakannya bertahap** atau menampilkan contoh siap-salin, jadi tidak perlu menebak formatnya.
+
 ### Manajemen Worker
 | Perintah | Deskripsi |
 | --- | --- |
-| `/menu` | Menu pusat bantuan |
+| `/menu` | Menu pusat bernomor (kontekstual) |
+| `/bantuan` | Daftar perintah lengkap (perintah admin disembunyikan dari non-admin) |
 | `/status` | Status sistem & diagnostik |
 | `/tambahdriver [Nama]#[ID]#[Usia]#[Reaksi]` | Tambah driver |
 | `/editdriver [Nama]#[Kolom]#[Nilai]` | Edit data driver |
@@ -246,22 +268,44 @@ Cek apakah login sudah berhasil dengan `/saldo`. Kalau muncul "BELUM LOGIN", ber
 > 🎛️ **Cukup ketik `/admin` satu kali.** Setelah itu semua aksi dilakukan dengan membalas angka atau menekan tombol — tidak perlu menghafal satu pun perintah. Daftar user & driver ditampilkan bernomor, tinggal pilih.
 
 ```
-🛡️ PANEL ADMIN
- 1️⃣ 👥 Kelola User & Akun    → lihat/aktifkan/nonaktifkan/reset password/jadikan admin/tautkan driver
- 2️⃣ 💰 Saldo & Transaksi    → lihat saldo, tambah/potong saldo, daftar order
- 3️⃣ 🚀 Absen Override       → absenkan 1 driver (bayar/gratis) atau semua driver
- 4️⃣ ⚙️ Form & Sistem        → lihat/ganti/reset link form, status server, jadwal libur
- 5️⃣ 📊 Statistik Sistem
+🛡️ PANEL ADMIN — AUTOBOT
+👥 User: 4  ·  🚚 Driver: 4
+💰 Total saldo: Rp 12.500
+⚠️ 1 driver belum lengkap berkasnya
+
+ 1️⃣ 👥 Kelola User & Akun       → lihat/aktifkan/nonaktifkan/reset password/jadikan admin/
+                                   tautkan driver/HAPUS AKUN
+ 2️⃣ 💰 Saldo & Transaksi        → saldo 1 user, SALDO MASSAL (semua/pilihan), daftar order
+ 3️⃣ 🚀 Absen Override           → absenkan 1 driver (bayar/gratis) atau semua driver
+ 4️⃣ 🚚 Kelola Driver & Berkas   → daftar+kesiapan, jadwal libur, set masuk, HAPUS DRIVER
+ 5️⃣ 💾 Cadangan & Pemulihan     → cadangkan sekarang, daftar arsip, panduan restore
+ 6️⃣ ⚙️ Form & Sistem            → lihat/ganti/reset link form, status server
+ 7️⃣ 📊 Statistik Sistem
  0️⃣ ❌ Keluar
 ```
 
-Setiap aksi berisiko (nonaktifkan akun, ubah saldo, jadikan admin, absen massal) selalu meminta **konfirmasi tombol ✅ Ya / ❌ Batal** terlebih dahulu.
+Kepala panel menampilkan ringkasan langsung: jumlah user & driver, total saldo seluruh akun, dan peringatan bila ada driver yang cookie/fotonya belum lengkap — jadi masalah terlihat tanpa perlu masuk ke menu statistik.
+
+Setiap aksi berisiko (nonaktifkan akun, ubah saldo, jadikan admin, absen massal, hapus akun, hapus driver) selalu meminta **konfirmasi ✅ Ya / ❌ Batal** terlebih dahulu. Penghapusan akun maupun driver **membuat cadangan otomatis** sebelum jalan, sehingga salah hapus masih bisa dibatalkan lewat `/restore`.
+
+**Contoh: isi saldo 5 driver sekaligus tanpa mengetik perintah**
+
+```
+/admin  →  2  →  4  →  50000  →  1
+          │    │      │         └ konfirmasi
+          │    │      └ nominal per akun
+          │    └ "Tambah saldo SEMUA"
+          └ menu Saldo & Transaksi
+```
+
+Mau pilih sendiri siapa yang dapat? Pilih `5` ("Tambah saldo PILIHAN"), lalu balas nomornya: `1,3` atau `2-4` atau `semua`.
 
 Perintah manual tetap tersedia bila diperlukan:
 
 | Perintah | Deskripsi |
 | --- | --- |
 | `/admin` | Buka panel admin interaktif |
+| `/adminhelp` | Daftar seluruh perintah admin (teks, dikelompokkan) |
 | `/listuser` | Daftar semua user & saldo |
 | `/aktifkan [email]` / `/nonaktifkan [email]` | Kelola status akun |
 | `/setadmin [email]` | Jadikan user sebagai admin |
