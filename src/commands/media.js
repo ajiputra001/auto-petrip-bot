@@ -9,6 +9,7 @@ const db = require('../database');
 const { generateNamaScreenshotTanggal, hapusFileAman } = require('../utils/helpers');
 const { downloadMediaRobust } = require('../utils/media-downloader');
 const logger = require('../utils/logger');
+const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
 
 /**
  * Update foto/screenshot driver
@@ -80,17 +81,28 @@ async function handleUpdateFoto(msg, pesan, waClient = null) {
     // Update database driver
     db.updateScreenshot(driver.nama, namaFileBaru);
 
-    let teks = `📸 *UPDATE FOTO REAKSI BERHASIL*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Driver : *${driver.nama}*${isFuzzy ? ` _(Terdeteksi otomatis dari "${inputNama}")_` : ''}\n`;
-    teks += `🆔 Driver ID : \`${driver.id}\`\n`;
-    teks += `📂 File Baru : \`${namaFileBaru}\`\n`;
-    teks += `📊 Ukuran   : *${ukuranKb} KB* (${media.mimetype || 'image/jpeg'})\n`;
-    teks += `🛡️ Status SS : *VALID & TERHUBUNG*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `⚡ *Autobot Engine*: Screenshot reaksi siap digunakan untuk pengisian otomatis!`;
+    const cookieOk = db.isCookieReady(driver);
 
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `📸 *FOTO REAKSI DIPERBARUI*`,
+            isi: [
+                `👤 Driver: ${tebal(driver.nama)}`,
+                cabang([
+                    `🆔 ID Reg: ${driver.id}`,
+                    `📂 Berkas: ${kode(namaFileBaru)}`,
+                    `📊 Ukuran: ${tebal(`${ukuranKb} KB`)} (${media.mimetype || 'image/jpeg'})`,
+                    `🛡️ Status: ${tebal('VALID & TERHUBUNG')}`,
+                ]),
+                isFuzzy ? `\n🔍 ${miring(`Nama "${inputNama}" dicocokkan otomatis.`)}` : null,
+            ].filter(Boolean),
+            kaki: [
+                cookieOk
+                    ? `✅ ${miring('Berkas lengkap — driver siap absen otomatis.')}`
+                    : `⚠️ Cookie belum ada. Kirim JSON dengan ${kode(`/updatecookie ${driver.nama.split(' ')[0]}`)}.`,
+            ],
+        })
+    );
 }
 
 /**
@@ -151,25 +163,59 @@ async function handleUpdateCookie(msg, pesan, waClient = null) {
     }
 
     // Validasi JSON
+    let jumlahCookie = 0;
     try {
-        JSON.parse(jsonString);
+        const parsed = JSON.parse(jsonString);
+        jumlahCookie = Array.isArray(parsed) ? parsed.length : Object.keys(parsed || {}).length;
+        if (!jumlahCookie) {
+            return msg.reply(
+                kartu({
+                    judul: `❌ *COOKIE KOSONG*`,
+                    isi: [`JSON valid, tapi tidak memuat satu pun cookie.`],
+                    kaki: [`💡 ${miring('Ekspor ulang cookie dari browser yang masih login ke Google.')}`],
+                })
+            );
+        }
     } catch (e) {
-        return msg.reply(`❌ *STRUKTUR JSON KORUP*\n\nFormat file/teks cookie bukan JSON valid.\nDetail error: _${e.message}_`);
+        return msg.reply(
+            kartu({
+                judul: `❌ *STRUKTUR JSON KORUP*`,
+                isi: [
+                    `Isi berkas/teks cookie bukan JSON yang valid.`,
+                    ``,
+                    `🔎 Detail: ${miring(e.message)}`,
+                ],
+                kaki: [`💡 ${miring('Pastikan seluruh isi berkas tersalin tanpa terpotong.')}`],
+            })
+        );
     }
 
     // Simpan cookie
     const cookiePath = path.join(config.cookieDir, driver.fileCookie);
     fs.writeFileSync(cookiePath, jsonString, 'utf8');
 
-    let teks = `✅ *SINKRONISASI COOKIE BERHASIL*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Driver   : *${driver.nama}*${isFuzzy ? ` _(Terdeteksi otomatis dari "${inputNama}")_` : ''}\n`;
-    teks += `🍪 File Session: \`${driver.fileCookie}\`\n`;
-    teks += `🔒 Security : *SESSION TOKEN VALID*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `⚡ Autobot siap melakukan otentikasi Google Form otomatis.`;
+    const ssOk = db.isScreenshotReady(driver);
 
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `🍪 *COOKIE TERSINKRONISASI*`,
+            isi: [
+                `👤 Driver: ${tebal(driver.nama)}`,
+                cabang([
+                    `🆔 ID Reg: ${driver.id}`,
+                    `🍪 Berkas sesi: ${kode(driver.fileCookie)}`,
+                    `📊 Jumlah cookie: ${tebal(jumlahCookie)}`,
+                    `🔒 Status: ${tebal('SESSION TOKEN VALID')}`,
+                ]),
+                isFuzzy ? `\n🔍 ${miring(`Nama "${inputNama}" dicocokkan otomatis.`)}` : null,
+            ].filter(Boolean),
+            kaki: [
+                ssOk
+                    ? `✅ ${miring('Berkas lengkap — driver siap absen otomatis.')}`
+                    : `⚠️ Foto belum ada. Kirim gambar dengan ${kode(`/updatefoto ${driver.nama.split(' ')[0]}`)}.`,
+            ],
+        })
+    );
 }
 
 module.exports = {

@@ -8,6 +8,7 @@ const db = require('../database');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { hapusFileAman } = require('../utils/helpers');
+const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
 
 /** Konfirmasi hapus driver yang menunggu, per chat. */
 const _hapusTertunda = new Map();
@@ -58,20 +59,29 @@ async function handleTambahDriver(msg, pesan) {
 
     const newDriver = db.addDriver({ nama, id, usia, reaksi, noWa: msg.from });
 
-    let teks = `✅ *REGISTRASI BERHASIL*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Nama    : *${newDriver.nama}*\n`;
-    teks += `🆔 ID Reg  : ${newDriver.id}\n`;
-    teks += `📅 Usia    : ${newDriver.usia} tahun\n`;
-    teks += `⚡ Reaksi  : ${newDriver.reaksi}ms\n`;
-    teks += `🍪 Cookie  : \`${newDriver.fileCookie}\`\n`;
-    teks += `📸 Foto    : \`${newDriver.fileSS}\`\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `📌 _Langkah selanjutnya:_\n`;
-    teks += `1️⃣ Kirim file JSON cookie dengan caption: \`/updatecookie ${nama.split(' ')[0]}\`\n`;
-    teks += `2️⃣ Kirim gambar screenshot dengan caption: \`/updatefoto ${nama.split(' ')[0]}\``;
+    const depan = nama.split(' ')[0];
 
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `✅ *DRIVER TERDAFTAR*`,
+            isi: [
+                `👤 Nama: ${tebal(newDriver.nama)}`,
+                cabang([
+                    `🆔 ID Reg: ${newDriver.id}`,
+                    `📅 Usia: ${newDriver.usia} tahun  ·  ⚡ Reaksi: ${newDriver.reaksi}ms`,
+                    `🍪 Cookie: ${kode(newDriver.fileCookie)}`,
+                    `📸 Foto: ${kode(newDriver.fileSS)}`,
+                ]),
+            ],
+            kaki: [
+                `📌 ${tebal('Dua langkah lagi sebelum bisa absen:')}`,
+                `1️⃣ Kirim file JSON cookie, caption ${kode(`/updatecookie ${depan}`)}`,
+                `2️⃣ Kirim gambar screenshot, caption ${kode(`/updatefoto ${depan}`)}`,
+                ``,
+                `💡 Cek kesiapannya dengan ${kode('/listdriver')}.`,
+            ],
+        })
+    );
 }
 
 /**
@@ -111,14 +121,21 @@ async function handleEditDriver(msg, pesan) {
         return msg.reply(`❌ ${result.error}`);
     }
 
-    let teks = `⚙️ *PERUBAHAN DATA BERHASIL*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Driver     : *${result.driver.nama}*\n`;
-    teks += `🔧 Kolom      : *${kolom.toUpperCase()}*\n`;
-    teks += `🔄 Nilai Baru : *${nilaiBaru}*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━`;
+    const satuan = kolom === 'usia' ? ' tahun' : kolom === 'reaksi' ? 'ms' : '';
 
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `⚙️ *DATA DRIVER DIPERBARUI*`,
+            isi: [
+                `👤 Driver: ${tebal(result.driver.nama)}`,
+                cabang([
+                    `🔧 Kolom: ${tebal(kolom.toUpperCase())}`,
+                    `🔄 Nilai baru: ${tebal(nilaiBaru + satuan)}`,
+                ]),
+            ],
+            kaki: [`💡 Lihat data lengkap dengan ${kode('/listdriver')}.`],
+        })
+    );
 }
 
 /**
@@ -162,20 +179,35 @@ async function handleHapusDriver(msg, pesan) {
 
     if (!inputNama) {
         const drivers = db.getAllDrivers();
-        if (!drivers.length) return msg.reply(`📋 Database driver kosong.`);
+        if (!drivers.length) {
+            return msg.reply(
+                kartu({
+                    judul: `🗑️ *HAPUS DRIVER*`,
+                    isi: [`📋 ${miring('Database driver masih kosong.')}`],
+                })
+            );
+        }
 
-        let teks = `🗑️ *HAPUS DRIVER*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-        drivers.forEach((d, i) => { teks += `${i + 1}. *${d.nama}* (ID ${d.id})\n`; });
-        teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        teks += `Gunakan: \`/hapusdriver [Nama]\`\nContoh: \`/hapusdriver ${drivers[0].nama}\``;
-        return msg.reply(teks);
+        return msg.reply(
+            kartu({
+                judul: `🗑️ *HAPUS DRIVER*`,
+                isi: [cabang(drivers.map((d) => `${tebal(d.nama)} — ID ${d.id}`))],
+                kaki: [
+                    `Gunakan: ${kode('/hapusdriver [Nama]')}`,
+                    `Contoh: ${kode(`/hapusdriver ${drivers[0].nama.split(' ')[0]}`)}`,
+                ],
+            })
+        );
     }
 
     const { driver } = db.findDriver(inputNama);
     if (!driver) {
         return msg.reply(
-            `❌ Driver *${inputNama}* tidak ditemukan.\n` +
-            `Lihat daftar: \`/hapusdriver\``
+            kartu({
+                judul: `❌ *DRIVER TIDAK DITEMUKAN*`,
+                isi: [`🔍 Dicari: ${tebal(inputNama)}`],
+                kaki: [`💡 Lihat daftar dengan ${kode('/hapusdriver')}.`],
+            })
         );
     }
 
@@ -190,22 +222,35 @@ async function handleHapusDriver(msg, pesan) {
         kedaluwarsa: Date.now() + HAPUS_BERLAKU_MS,
     });
 
-    let teks = `⚠️ *KONFIRMASI HAPUS DRIVER*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `🚚 *${driver.nama}*\n🆔 ID Reg: ${driver.id}\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `Data driver, jadwal libur, cookie & foto akan *DIHAPUS*.\n`;
-    teks += `_(Dicadangkan otomatis sebelum dihapus.)_\n`;
+    const isi = [
+        `🚚 ${tebal(driver.nama)}`,
+        cabang([`🆔 ID Reg: ${driver.id}`]),
+        ``,
+        `Yang akan ${tebal('DIHAPUS')}:`,
+        cabang(['Data driver & jadwal libur', 'Berkas cookie', 'Berkas foto screenshot']),
+    ];
 
     if (terkait.length) {
-        teks += `\n🔗 *${terkait.length} akun* masih tertaut ke driver ini:\n`;
-        terkait.forEach((u) => { teks += `• ${u.nama} (${u.email})\n`; });
-        teks += `_Akunnya tidak ikut terhapus, tapi tidak bisa absen sampai ditautkan ulang._\n`;
+        isi.push(``);
+        isi.push(`🔗 ${tebal(`${terkait.length} akun`)} masih tertaut ke driver ini:`);
+        isi.push(cabang(terkait.map((u) => `${u.nama} (${u.email})`)));
+        isi.push(miring('Akunnya tidak ikut terhapus, tapi tidak bisa absen sampai ditautkan ulang.'));
     }
 
-    teks += `\n✅ Ketik \`/hapusdriver ya\` untuk lanjut\n`;
-    teks += `🚫 Ketik \`/hapusdriver batal\` untuk membatalkan\n\n_Berlaku 3 menit._`;
-
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `⚠️ *KONFIRMASI HAPUS DRIVER*`,
+            isi,
+            kaki: [
+                `🛟 ${miring('Dicadangkan otomatis sebelum dihapus.')}`,
+                ``,
+                `✅ Lanjut: ${kode('/hapusdriver ya')}`,
+                `🚫 Batal: ${kode('/hapusdriver batal')}`,
+                ``,
+                `⏳ ${miring('Berlaku 3 menit.')}`,
+            ],
+        })
+    );
 }
 
 /**
@@ -245,13 +290,20 @@ async function _jalankanHapusDriver(msg, nama) {
     logger.warn('DRIVER', `Driver ${result.namaLengkap} dihapus oleh ${msg.from} (${terhapus} berkas dibersihkan).`);
 
     return msg.reply(
-        `✅ *DRIVER DIHAPUS*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🗑️ *${result.namaLengkap}*\n` +
-        `📂 Berkas dibersihkan: ${terhapus} (cookie & foto)\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━\n` +
-        (namaArsip
-            ? `🛟 Dicadangkan dulu sebagai:\n\`${namaArsip}\`\n_Pulihkan dengan \`/restore\` bila salah hapus._`
-            : `⚠️ _Cadangan gagal dibuat — penghapusan tidak bisa dibatalkan._`)
+        kartu({
+            judul: `✅ *DRIVER DIHAPUS*`,
+            isi: [
+                `🗑️ ${tebal(result.namaLengkap)}`,
+                cabang([`📂 Berkas dibersihkan: ${terhapus} (cookie & foto)`]),
+            ],
+            kaki: namaArsip
+                ? [
+                    `🛟 Dicadangkan dulu sebagai:`,
+                    kode(namaArsip),
+                    `💡 Pulihkan dengan ${kode('/restore')} bila salah hapus.`,
+                ]
+                : [`⚠️ ${miring('Cadangan gagal dibuat — penghapusan tidak bisa dibatalkan.')}`],
+        })
     );
 }
 
@@ -266,29 +318,38 @@ async function handleListDriver(msg) {
         return msg.reply(`📋 Database driver kosong.`);
     }
 
-    let teks = `📋 *DAFTAR DRIVER & KESIAPAN DATA*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    const jadwal = db.getJadwal();
+    const isi = [];
+    const belumSiap = [];
 
     drivers.forEach((d, i) => {
         const cookieOk = db.isCookieReady(d);
         const ssOk = db.isScreenshotReady(d);
-        
-        const cookieStatus = cookieOk ? '🟢 Ready' : '🔴 Missing';
-        const ssStatus = ssOk ? '🟢 Ready' : '🔴 Missing';
+        const siap = cookieOk && ssOk;
+        if (!siap) belumSiap.push(d.nama);
 
-        teks += `\n${i + 1}. *${d.nama.toUpperCase()}*\n`;
-        teks += `   🆔 ID Reg  : ${d.id}\n`;
-        teks += `   📅 Usia    : ${d.usia} tahun\n`;
-        teks += `   ⚡ Reaksi  : ${d.reaksi}ms\n`;
-        teks += `   🔑 Cookie  : ${cookieStatus}\n`;
-        teks += `   🖼️ Foto SS  : ${ssStatus}\n`;
+        const libur = String(jadwal[d.nama] || '-').trim();
+
+        if (i > 0) isi.push(``);
+        isi.push(`${siap ? '🟢' : '🔴'} ${i + 1}. ${tebal(d.nama)}`);
+        isi.push(cabang([
+            `🆔 ID Reg: ${d.id}`,
+            `📅 Usia: ${d.usia} tahun  ·  ⚡ Reaksi: ${d.reaksi}ms`,
+            libur === '-' || !libur ? `📆 Jadwal: masuk setiap hari` : `📆 Jadwal: libur tiap ${libur}`,
+            `🔑 Cookie: ${cookieOk ? 'siap' : 'belum ada'}  ·  🖼️ Foto: ${ssOk ? 'siap' : 'belum ada'}`,
+        ]));
     });
 
-    teks += `\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👥 *Total Driver*: ${drivers.length} orang\n`;
-    teks += `💡 _Pastikan semua berstatus 🟢 Ready sebelum melakukan proses absen._`;
+    const kaki = [`👥 Total driver: ${tebal(`${drivers.length} orang`)}`];
 
-    return msg.reply(teks);
+    if (belumSiap.length) {
+        kaki.push(`⚠️ Belum siap absen: ${tebal(belumSiap.join(', '))}`);
+        kaki.push(`💡 Lengkapi dengan ${kode('/updatecookie [Nama]')} & ${kode('/updatefoto [Nama]')}.`);
+    } else {
+        kaki.push(`✅ ${miring('Semua berkas lengkap — siap absen otomatis.')}`);
+    }
+
+    return msg.reply(kartu({ judul: `📋 *DAFTAR DRIVER & KESIAPAN DATA*`, isi, kaki }));
 }
 
 module.exports = {
