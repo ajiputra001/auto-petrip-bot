@@ -42,30 +42,48 @@ async function handleAdminMenu(msg) {
         return msg.reply(`❌ *AKSES DITOLAK*\nPerintah ini khusus admin.`);
     }
 
-    let teks = `🛡️ *MENU ADMIN*\n`;
+    let teks = `🛡️ *PERINTAH ADMIN LENGKAP*\n`;
     teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👥 \`/listuser\` — Daftar semua user\n`;
-    teks += `✅ \`/aktifkan [email]\` — Aktifkan akun\n`;
-    teks += `🚫 \`/nonaktifkan [email]\` — Nonaktifkan akun\n`;
-    teks += `👑 \`/setadmin [email]\` — Jadikan admin\n`;
-    teks += `🔑 \`/adminreset [email] [pass]\` — Reset password\n`;
-    teks += `💰 \`/adjust [email] [nominal]\` — Tambah/potong saldo\n`;
-    teks += `🧾 \`/orderlist\` — Lihat order top-up\n`;
-    teks += `📊 \`/adminstat\` — Statistik sistem\n`;
-    teks += `🔗 \`/setform [link]\` — Ganti link Google Form\n`;
-    teks += `👁️ \`/getform\` — Lihat link form aktif\n`;
-    teks += `↩️ \`/resetform\` — Kembalikan ke link default (.env)\n`;
-    teks += `🆔 \`/idgrup\` — Lihat ID chat ini & cek tujuan laporan\n`;
-    teks += `👥 \`/listgrup\` — Daftar semua grup + ID-nya\n`;
-    teks += `🚚 \`/absenkan [Nama|email]\` — Absen manual atas nama driver\n`;
-    teks += `🆓 \`/absenkan [Nama] gratis\` — Absen tanpa potong saldo\n`;
-    teks += `👥 \`/absenkansemua\` — Absen semua driver (tanpa potong saldo)\n`;
-    teks += `💰 \`/adjustsemua [nominal]\` — Tambah saldo banyak user sekaligus\n`;
-    teks += `🗑️ \`/hapusakun [email]\` — Hapus akun user permanen\n`;
-    teks += `🚚 \`/hapusdriver [Nama]\` — Hapus driver + cookie & foto\n`;
-    teks += `💾 \`/backup\` — Cadangkan data & kirim ke WA\n`;
-    teks += `📦 \`/listbackup\` — Daftar cadangan di VPS\n`;
-    teks += `♻️ \`/restore\` — Pulihkan data (lampirkan berkas cadangan)\n`;
+    teks += `💡 _Panel interaktif lebih mudah: ketik_ \`/admin\`\n`;
+    teks += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    teks += `👥 *USER & AKUN*\n`;
+    teks += `• \`/listuser\` — Daftar semua user\n`;
+    teks += `• \`/aktifkan [email]\` — Aktifkan akun\n`;
+    teks += `• \`/nonaktifkan [email]\` — Nonaktifkan akun\n`;
+    teks += `• \`/setadmin [email]\` — Jadikan admin\n`;
+    teks += `• \`/adminreset [email] [pass]\` — Reset password\n`;
+    teks += `• \`/hapusakun [email]\` — Hapus akun permanen\n`;
+    teks += `• \`/linkdriveruser [email] [Nama]\` — Tautkan ke driver\n\n`;
+
+    teks += `💰 *SALDO*\n`;
+    teks += `• \`/adjust [email] [nominal]\` — Satu user\n`;
+    teks += `• \`/adjustsemua [nominal]\` — Semua user sekaligus\n`;
+    teks += `• \`/adjustsemua [nominal] 1,3\` — Pilih sebagian\n`;
+    teks += `• \`/adjustsemua [nominal] 2-5\` — Rentang nomor\n`;
+    teks += `• \`/orderlist\` — Lihat order top-up\n\n`;
+
+    teks += `🚀 *ABSEN OVERRIDE*\n`;
+    teks += `• \`/absenkan [Nama|email]\` — Atas nama driver\n`;
+    teks += `• \`/absenkan [Nama] gratis\` — Tanpa potong saldo\n`;
+    teks += `• \`/absenkansemua\` — Semua driver (gratis)\n\n`;
+
+    teks += `🚚 *DRIVER*\n`;
+    teks += `• \`/hapusdriver [Nama]\` — Hapus + cookie & foto\n`;
+    teks += `• \`/listdriver\` — Daftar & kesiapan berkas\n\n`;
+
+    teks += `💾 *CADANGAN DATA*\n`;
+    teks += `• \`/backup\` — Cadangkan & kirim ke WA\n`;
+    teks += `• \`/listbackup\` — Daftar cadangan di VPS\n`;
+    teks += `• \`/restore\` — Pulihkan (lampirkan berkas)\n\n`;
+
+    teks += `⚙️ *FORM & SISTEM*\n`;
+    teks += `• \`/setform [link]\` — Ganti link Google Form\n`;
+    teks += `• \`/getform\` — Lihat link form aktif\n`;
+    teks += `• \`/resetform\` — Kembalikan ke default (.env)\n`;
+    teks += `• \`/adminstat\` — Statistik sistem\n`;
+    teks += `• \`/idgrup\` — ID chat ini & cek tujuan laporan\n`;
+    teks += `• \`/listgrup\` — Daftar semua grup + ID-nya\n`;
     teks += `━━━━━━━━━━━━━━━━━━━━━━`;
     return msg.reply(teks);
 }

@@ -17,7 +17,7 @@ const {
     handleTopup, handleRiwayat, handleLinkAkun, handleLinkDriver,
 } = require('./akun');
 const {
-    handleListUser, handleAktifkan, handleNonaktifkan,
+    handleAdminMenu, handleListUser, handleAktifkan, handleNonaktifkan,
     handleSetAdmin, handleAdminReset, handleAdjust, handleOrderList, handleAdminStat,
     handleSetForm, handleGetForm, handleResetForm, handleAbsenkan, handleAbsenkanSemua,
     handleLinkDriverUser, handleIdGrup, handleListGrup,
@@ -40,7 +40,7 @@ const KNOWN_COMMANDS = [
     '/setform', '/getform', '/resetform', '/absenkan', '/absenkansemua', '/linkdriveruser',
     '/idgrup', '/listgrup',
     '/backup', '/restore', '/listbackup',
-    '/adjustsemua', '/hapusakun'
+    '/adjustsemua', '/hapusakun', '/adminhelp', '/adminmenu'
 ];
 
 /**
@@ -84,6 +84,7 @@ const ROUTES = [
 
     // Admin
     { match: (cmd) => cmd === '/admin', handler: (msg, pesan, client) => showAdminMenu(client, msg) },
+    { match: (cmd) => cmd === '/adminhelp' || cmd === '/adminmenu',          handler: handleAdminMenu },
     { match: (cmd) => cmd === '/listuser',                                  handler: handleListUser },
     { match: (cmd) => cmd.startsWith('/aktifkan ') || cmd === '/aktifkan',  handler: handleAktifkan },
     { match: (cmd) => cmd.startsWith('/nonaktifkan ') || cmd === '/nonaktifkan', handler: handleNonaktifkan },
