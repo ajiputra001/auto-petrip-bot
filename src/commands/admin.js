@@ -10,6 +10,8 @@ const db = require('../database');
 const config = require('../config');
 const { formatRupiah, withTimeout } = require('../utils/helpers');
 const { getUserIdByWa, getSenderWa } = require('./akun');
+const { kartu, kode, tebal, miring, cabang, rupiahBertanda } = require('../utils/tampilan');
+const logger = require('../utils/logger');
 
 /**
  * Cek apakah pengirim (msg) adalah admin.
@@ -127,10 +129,18 @@ async function handleAbsenkan(msg, pesan, waClient) {
     if (!driver) return msg.reply(`❌ Driver *${targetNama}* tidak terdaftar dalam database.`);
 
     await msg.reply(
-        `🛡️ *ADMIN OVERRIDE ABSEN*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🚚 Driver : *${driver.nama}*\n` +
-        `💳 Saldo  : ${skipCharge ? '🆓 Tidak dipotong' : 'Dipotong normal'}\n\n` +
-        `⚡ Memulai proses...`
+        kartu({
+            judul: `🛡️ *ADMIN OVERRIDE ABSEN*`,
+            isi: [
+                `🚚 Driver: ${tebal(driver.nama)}`,
+                cabang([
+                    `💳 Saldo: ${skipCharge ? '🆓 tidak dipotong' : `dipotong ${formatRupiah(config.pricePerAbsen)}`}`,
+                    `🔑 Cookie: ${db.isCookieReady(driver) ? 'siap' : '⚠️ belum ada'}`,
+                    `🖼️ Foto: ${db.isScreenshotReady(driver) ? 'siap' : '⚠️ belum ada'}`,
+                ]),
+            ],
+            kaki: [`⚡ ${miring('Memulai proses, laporan dikirim setelah selesai...')}`],
+        })
     );
 
     const { prosesAbsenMassal } = require('../services/form-filler');
@@ -161,9 +171,18 @@ async function handleLinkDriverUser(msg, pesan) {
     if (!r.success) return msg.reply(`❌ ${r.error}`);
 
     return msg.reply(
-        `✅ *AKUN DITAUTKAN*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `👤 Akun  : *${r.user.nama}* (${email})\n` +
-        `🚚 Driver: *${r.user.driverNama}*`
+        kartu({
+            judul: `✅ *AKUN DITAUTKAN*`,
+            isi: [
+                `👤 ${tebal(r.user.nama)}`,
+                cabang([
+                    `📧 ${email}`,
+                    `🚚 Driver: ${tebal(r.user.driverNama)}`,
+                    `💰 Saldo: ${formatRupiah(wallet.getBalance(r.user.id))}`,
+                ]),
+            ],
+            kaki: [`📌 ${miring('Absen otomatis driver ini akan memotong saldo akun tersebut.')}`],
+        })
     );
 }
 
@@ -191,17 +210,34 @@ async function handleListUser(msg) {
     const users = auth.listUsers();
     if (!users.length) return msg.reply(`📋 Belum ada user.`);
 
-    let teks = `👥 *DAFTAR USER*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    const isi = [];
+    let totalSaldo = 0;
+
     users.forEach((u, i) => {
-        const status = u.isActive !== false ? '🟢 Aktif' : '🔴 Nonaktif';
-        const role = u.role === 'admin' ? '👑 Admin' : '👤 Driver';
-        teks += `${i + 1}. *${u.nama}* (${role})\n`;
-        teks += `   📧 ${u.email}\n`;
-        teks += `   💰 ${formatRupiah(wallet.getBalance(u.id))} | ${status}\n\n`;
+        const aktif = u.isActive !== false;
+        const saldo = wallet.getBalance(u.id);
+        totalSaldo += saldo;
+
+        if (i > 0) isi.push(``);
+        isi.push(`${aktif ? '🟢' : '🔴'} ${i + 1}. ${tebal(u.nama)}${u.role === 'admin' ? ' 🛡️' : ''}`);
+        isi.push(cabang([
+            `📧 ${u.email}`,
+            u.driverNama ? `🚚 Driver: ${u.driverNama}` : `⚠️ Belum tertaut driver`,
+            `💰 Saldo: ${formatRupiah(saldo)}  ·  ${aktif ? 'aktif' : 'nonaktif'}`,
+        ]));
     });
-    teks += `━━━━━━━━━━━━━━━━━━━━━━`;
-    return msg.reply(teks);
+
+    const nonaktif = users.filter((u) => u.isActive === false).length;
+    const tanpaDriver = users.filter((u) => !u.driverNama).length;
+
+    const kaki = [
+        `👥 Total: ${tebal(`${users.length} akun`)}  ·  💰 ${tebal(formatRupiah(totalSaldo))}`,
+    ];
+    if (nonaktif) kaki.push(`🔴 Nonaktif: ${nonaktif} akun`);
+    if (tanpaDriver) kaki.push(`⚠️ ${tanpaDriver} akun belum tertaut driver`);
+    kaki.push(`💡 ${kode('/adjust [email] [nominal]')} ubah saldo`);
+
+    return msg.reply(kartu({ judul: `👥 *DAFTAR USER*`, isi, kaki }));
 }
 
 /**
@@ -274,10 +310,26 @@ async function handleAdminReset(msg, pesan) {
 /**
  * /adjust [email] [nominal] — tambah/potong saldo
  */
-async function handleAdjust(msg, pesan) {
+async function handleAdjust(msg, pesan, waClient = null) {
     if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const args = pesan.split(' ').filter(Boolean);
-    if (args.length < 3) return msg.reply(`Gunakan: \`/adjust [email] [nominal]\`\nContoh: \`/adjust budi@gmail.com 50000\` atau \`/adjust budi@gmail.com -10000\``);
+    if (args.length < 3) {
+        return msg.reply(
+            kartu({
+                judul: `💰 *UBAH SALDO AKUN*`,
+                isi: [
+                    `Gunakan: ${kode('/adjust [email] [nominal]')}`,
+                    ``,
+                    `➕ Tambah: ${kode('/adjust budi@gmail.com 50000')}`,
+                    `➖ Potong: ${kode('/adjust budi@gmail.com -10000')}`,
+                ],
+                kaki: [
+                    `💡 ${kode('/listuser')} lihat email akun`,
+                    `💡 ${kode('/adjustsemua')} ubah saldo banyak akun`,
+                ],
+            })
+        );
+    }
 
     const email = args[1];
     const amount = Number(args[2]);
@@ -290,7 +342,52 @@ async function handleAdjust(msg, pesan) {
     const r = wallet.mutateBalance(user.id, amount, amount > 0 ? 'ADJUST' : 'ADJUST', 'Penyesuaian admin', { admin: msg.from });
     if (!r.success) return msg.reply(`❌ ${r.error}`);
 
-    return msg.reply(`💰 Saldo *${user.nama}* ${amount >= 0 ? 'ditambah' : 'dipotong'} ${formatRupiah(Math.abs(amount))}.\nSaldo sekarang: *${formatRupiah(r.balance)}*`);
+    const harga = Number(config.pricePerAbsen) || 0;
+    const sisaAbsen = harga > 0 ? Math.floor(r.balance / harga) : null;
+
+    // Pemilik akun diberi tahu agar tidak bingung saldonya berubah sendiri,
+    // sama seperti perilaku /adjustsemua.
+    let diberitahu = false;
+    if (waClient) {
+        const { getWaNumbersByUserId } = require('./akun');
+        for (const wa of getWaNumbersByUserId(user.id)) {
+            try {
+                await waClient.sendMessage(wa, kartu({
+                    judul: amount > 0 ? `💰 *SALDO DITAMBAHKAN*` : `➖ *SALDO DISESUAIKAN*`,
+                    isi: [
+                        `${amount > 0 ? '➕' : '➖'} Perubahan: ${tebal(rupiahBertanda(amount))}`,
+                        `💰 Saldo kini: ${tebal(formatRupiah(r.balance))}`,
+                    ],
+                    kaki: [`📌 ${miring('Disesuaikan oleh admin.')}`],
+                }));
+                diberitahu = true;
+            } catch (e) {
+                logger.debug('ADMIN', `Notifikasi saldo ke ${wa} gagal: ${e.message}`);
+            }
+        }
+    }
+
+    return msg.reply(
+        kartu({
+            judul: amount > 0 ? `➕ *SALDO DITAMBAHKAN*` : `➖ *SALDO DIPOTONG*`,
+            isi: [
+                `👤 ${tebal(user.nama)}`,
+                cabang([
+                    `📧 ${user.email}`,
+                    `${amount > 0 ? '➕' : '➖'} Perubahan: ${tebal(rupiahBertanda(amount))}`,
+                    `💰 Saldo kini: ${tebal(formatRupiah(r.balance))}`,
+                ]),
+            ],
+            kaki: [
+                sisaAbsen === null
+                    ? `🆓 ${miring('Tarif absen sedang Rp 0.')}`
+                    : `🎟️ Cukup untuk ${tebal(`${sisaAbsen}x absen`)} @ ${formatRupiah(harga)}`,
+                diberitahu
+                    ? `📩 ${miring('Pemilik akun sudah diberi tahu.')}`
+                    : `📭 ${miring('Pemilik akun belum login WA, tidak ada notifikasi.')}`,
+            ],
+        })
+    );
 }
 
 /**
@@ -324,17 +421,52 @@ async function handleAdminStat(msg) {
     const w = wallet.summary();
     const orders = payment.listOrders(500);
 
-    let teks = `📊 *STATISTIK SISTEM*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👥 User         : ${users.length}\n`;
-    teks += `🟢 Aktif        : ${users.filter(u => u.isActive !== false).length}\n`;
-    teks += `🔴 Nonaktif     : ${users.filter(u => u.isActive === false).length}\n`;
-    teks += `💰 Total Saldo  : ${formatRupiah(w.totalBalance)}\n`;
-    teks += `📈 Total Top-up : ${formatRupiah(w.totalTopup)}\n`;
-    teks += `🧾 Order Pending: ${orders.filter(o => o.status === 'PENDING').length}\n`;
-    teks += `✅ Order Sukses : ${orders.filter(o => o.status === 'PAID').length}\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━`;
-    return msg.reply(teks);
+    const drivers = db.getAllDrivers();
+    const belumSiap = drivers.filter((d) => !db.isCookieReady(d) || !db.isScreenshotReady(d));
+    const pending = orders.filter((o) => o.status === 'PENDING').length;
+    const sukses = orders.filter((o) => o.status === 'PAID').length;
+
+    const harga = Number(config.pricePerAbsen) || 0;
+    const sisaAbsen = harga > 0 ? Math.floor(w.totalBalance / harga) : null;
+
+    return msg.reply(
+        kartu({
+            judul: `📊 *STATISTIK SISTEM*`,
+            isi: [
+                `👥 *Akun*`,
+                cabang([
+                    `Total: ${tebal(users.length)}`,
+                    `Aktif: ${users.filter((u) => u.isActive !== false).length}  ·  Nonaktif: ${users.filter((u) => u.isActive === false).length}`,
+                ]),
+                ``,
+                `🚚 *Driver*`,
+                cabang([
+                    `Terdaftar: ${tebal(drivers.length)}`,
+                    belumSiap.length
+                        ? `Belum lengkap: ${belumSiap.length} (${belumSiap.map((d) => d.nama).join(', ')})`
+                        : `Semua berkas lengkap ✅`,
+                ]),
+                ``,
+                `💰 *Keuangan*`,
+                cabang([
+                    `Total saldo: ${tebal(formatRupiah(w.totalBalance))}`,
+                    sisaAbsen === null
+                        ? `Tarif absen: gratis (Rp 0)`
+                        : `Setara ${tebal(`${sisaAbsen}x absen`)} @ ${formatRupiah(harga)}`,
+                    `Total top-up: ${formatRupiah(w.totalTopup)}`,
+                ]),
+                ``,
+                `🧾 *Order Top-up*`,
+                cabang([
+                    `Sukses: ${sukses}  ·  Pending: ${pending}`,
+                ]),
+            ],
+            kaki: [
+                pending ? `⏳ ${miring(`${pending} order menunggu pembayaran.`)}` : null,
+                `💡 ${kode('/listuser')} detail akun  ·  ${kode('/listdriver')} detail driver`,
+            ].filter(Boolean),
+        })
+    );
 }
 
 /**

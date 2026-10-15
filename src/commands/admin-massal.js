@@ -12,6 +12,7 @@ const wallet = require('../wallet');
 const { formatRupiah } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { clearAllWaSessions } = require('./akun');
+const { kartu, kode, tebal, miring, cabang, rupiahBertanda } = require('../utils/tampilan');
 
 /** Konfirmasi tertunda per chat: aksi berisiko tidak dijalankan sekali ketik. */
 const menunggu = new Map();
@@ -161,15 +162,36 @@ async function handleAdjustSemua(msg, pesan, waClient) {
     // Pemotongan massal bisa mengosongkan banyak dompet sekaligus, jadi
     // ditahan dulu di layar konfirmasi.
     const total = Math.abs(nominal) * pilihan.length;
-    let teks = `⚠️ *KONFIRMASI SALDO MASSAL*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `${nominal > 0 ? '➕ Menambah' : '➖ Memotong'} *${formatRupiah(Math.abs(nominal))}* per akun\n`;
-    teks += `👥 Penerima: *${pilihan.length}* akun\n`;
-    teks += `🧮 Total dana: *${formatRupiah(total)}*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    pilihan.forEach((u) => { teks += `• ${u.nama} (${u.driverNama})\n`; });
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `✅ Ketik \`/adjustsemua ya\` untuk lanjut\n`;
-    teks += `🚫 Ketik \`/adjustsemua batal\` untuk membatalkan\n\n_Berlaku 3 menit._`;
+
+    // Pemotongan yang membuat saldo minus perlu disorot sebelum dieksekusi.
+    const akanMinus = nominal < 0
+        ? pilihan.filter((u) => wallet.getBalance(u.id) + nominal < 0)
+        : [];
+
+    const teks = kartu({
+        judul: `⚠️ *KONFIRMASI SALDO MASSAL*`,
+        isi: [
+            `${nominal > 0 ? '➕ Menambah' : '➖ Memotong'} ${tebal(formatRupiah(Math.abs(nominal)))} per akun`,
+            cabang([
+                `👥 Penerima: ${tebal(`${pilihan.length} akun`)}`,
+                `🧮 Total dana: ${tebal(formatRupiah(total))}`,
+            ]),
+            ``,
+            `📋 *Daftar penerima*`,
+            cabang(pilihan.map((u) =>
+                `${u.nama} — ${formatRupiah(wallet.getBalance(u.id))} → ${formatRupiah(wallet.getBalance(u.id) + nominal)}`
+            )),
+            akanMinus.length
+                ? `\n🔴 ${tebal(`${akanMinus.length} akun`)} saldonya jadi minus: ${akanMinus.map((u) => u.nama).join(', ')}`
+                : null,
+        ].filter((v) => v !== null),
+        kaki: [
+            `✅ Lanjut: ${kode('/adjustsemua ya')}`,
+            `🚫 Batal: ${kode('/adjustsemua batal')}`,
+            ``,
+            `⏳ ${miring('Berlaku 3 menit.')}`,
+        ],
+    });
 
     _simpanKonfirmasi(msg, { jenis: 'adjust', nominal, userIds: pilihan.map((u) => u.id) });
     return msg.reply(teks);
@@ -207,18 +229,29 @@ async function _jalankanAdjust(msg, waClient, nominal, userIds) {
         }
     }
 
-    let teks = `${gagal.length ? '⚠️' : '✅'} *SALDO MASSAL SELESAI*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `${nominal > 0 ? '➕' : '➖'} ${formatRupiah(Math.abs(nominal))} per akun\n\n`;
+    const isi = [
+        `${nominal > 0 ? '➕' : '➖'} ${tebal(formatRupiah(Math.abs(nominal)))} per akun`,
+    ];
 
     if (berhasil.length) {
-        teks += `*Berhasil (${berhasil.length}):*\n`;
-        berhasil.forEach((b) => { teks += `✅ ${b.nama} → ${formatRupiah(b.saldo)}\n`; });
+        isi.push(``);
+        isi.push(`✅ *Berhasil (${berhasil.length})*`);
+        isi.push(cabang(berhasil.map((b) => `${b.nama} → ${formatRupiah(b.saldo)}`)));
     }
     if (gagal.length) {
-        teks += `\n*Gagal (${gagal.length}):*\n`;
-        gagal.forEach((g) => { teks += `❌ ${g.nama} — ${g.alasan}\n`; });
+        isi.push(``);
+        isi.push(`❌ *Gagal (${gagal.length})*`);
+        isi.push(cabang(gagal.map((g) => `${g.nama} — ${g.alasan}`)));
     }
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n💾 _Cadangan otomatis dibuat._`;
+
+    const teks = kartu({
+        judul: gagal.length ? `⚠️ *SALDO MASSAL SELESAI SEBAGIAN*` : `✅ *SALDO MASSAL SELESAI*`,
+        isi,
+        kaki: [
+            `🧮 Total dana: ${tebal(formatRupiah(Math.abs(nominal) * berhasil.length))}`,
+            `💾 ${miring('Cadangan otomatis dibuat.')}`,
+        ],
+    });
 
     logger.success('ADMIN', `Saldo massal ${nominal} untuk ${berhasil.length} akun oleh ${msg.from}`);
     await msg.reply(teks);
@@ -231,11 +264,14 @@ async function _jalankanAdjust(msg, waClient, nominal, userIds) {
             if (!user) continue;
             for (const wa of getWaNumbersByUserId(userId)) {
                 try {
-                    await waClient.sendMessage(wa,
-                        `${nominal > 0 ? '💰 *SALDO DITAMBAHKAN*' : '➖ *SALDO DISESUAIKAN*'}\n` +
-                        `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                        `${nominal > 0 ? '+' : ''}${formatRupiah(nominal)} oleh admin\n` +
-                        `💳 Saldo sekarang: *${formatRupiah(wallet.getBalance(userId))}*`);
+                    await waClient.sendMessage(wa, kartu({
+                        judul: nominal > 0 ? `💰 *SALDO DITAMBAHKAN*` : `➖ *SALDO DISESUAIKAN*`,
+                        isi: [
+                            `${nominal > 0 ? '➕' : '➖'} Perubahan: ${tebal(rupiahBertanda(nominal))}`,
+                            `💰 Saldo kini: ${tebal(formatRupiah(wallet.getBalance(userId)))}`,
+                        ],
+                        kaki: [`📌 ${miring('Disesuaikan oleh admin.')}`],
+                    }));
                 } catch (e) {
                     logger.debug('ADMIN', `Notifikasi saldo ke ${wa} gagal: ${e.message}`);
                 }
@@ -284,17 +320,24 @@ async function handleHapusAkun(msg, pesan) {
         const sesi = clearAllWaSessions(user.id);
 
         logger.warn('ADMIN', `Akun ${user.email} dihapus oleh ${msg.from}`);
-        return msg.reply(
-            `✅ *AKUN DIHAPUS*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `👤 ${user.nama}\n📧 ${user.email}\n` +
-            `💰 Saldo terhapus: ${formatRupiah(dompet.saldoTerakhir)}\n` +
-            `🔓 Sesi dicabut : ${sesi}\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            (namaArsip
-                ? `🛟 Dicadangkan dulu sebagai:\n\`${namaArsip}\`\n_Pulihkan dengan \`/restore\` bila salah hapus._`
-                : `⚠️ _Cadangan gagal dibuat — penghapusan tidak bisa dibatalkan._`) +
-            `\n\n💡 Data driver *tidak* ikut terhapus. Pakai \`/hapusdriver\` bila perlu.`
-        );
+        return msg.reply(kartu({
+            judul: `✅ *AKUN DIHAPUS*`,
+            isi: [
+                `👤 ${tebal(user.nama)}`,
+                cabang([
+                    `📧 ${user.email}`,
+                    `💰 Saldo terhapus: ${formatRupiah(dompet.saldoTerakhir)}`,
+                    `🔓 Sesi dicabut: ${sesi}`,
+                ]),
+            ],
+            kaki: [
+                namaArsip
+                    ? `🛟 Dicadangkan dulu sebagai:\n${kode(namaArsip)}\n💡 Pulihkan dengan ${kode('/restore')} bila salah hapus.`
+                    : `⚠️ ${miring('Cadangan gagal dibuat — penghapusan tidak bisa dibatalkan.')}`,
+                ``,
+                `📌 ${miring('Data driver tidak ikut terhapus.')} Pakai ${kode('/hapusdriver')} bila perlu.`,
+            ],
+        }));
     }
 
     if (['batal', 'cancel', 'tidak'].includes(argumen)) {
@@ -305,16 +348,26 @@ async function handleHapusAkun(msg, pesan) {
     // ── Tanpa argumen: tampilkan daftar akun ──
     if (!args.length) {
         const users = auth.listUsers();
-        let teks = `🗑️ *HAPUS AKUN*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+        const isi = [];
+
         users.forEach((u, i) => {
-            teks += `${i + 1}. *${u.nama}* ${u.role === 'admin' ? '🛡️' : ''}\n`;
-            teks += `    ${u.email}\n`;
-            teks += `    🚚 ${u.driverNama || '—'}  💰 ${formatRupiah(wallet.getBalance(u.id))}\n`;
+            if (i > 0) isi.push(``);
+            isi.push(`${i + 1}. ${tebal(u.nama)}${u.role === 'admin' ? ' 🛡️' : ''}`);
+            isi.push(cabang([
+                `📧 ${u.email}`,
+                `🚚 ${u.driverNama || 'belum tertaut'}`,
+                `💰 ${formatRupiah(wallet.getBalance(u.id))}`,
+            ]));
         });
-        teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        teks += `Gunakan: \`/hapusakun [email]\`\n`;
-        teks += `Contoh: \`/hapusakun budi@gmail.com\``;
-        return msg.reply(teks);
+
+        return msg.reply(kartu({
+            judul: `🗑️ *HAPUS AKUN*`,
+            isi,
+            kaki: [
+                `Gunakan: ${kode('/hapusakun [email]')}`,
+                `Contoh: ${kode(`/hapusakun ${users[0] ? users[0].email : 'budi@gmail.com'}`)}`,
+            ],
+        }));
     }
 
     const email = args[0];
@@ -334,18 +387,34 @@ async function handleHapusAkun(msg, pesan) {
 
     _simpanKonfirmasi(msg, { jenis: 'hapusakun', userId: user.id });
 
-    return msg.reply(
-        `⚠️ *KONFIRMASI HAPUS AKUN*\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `👤 ${user.nama} ${user.role === 'admin' ? '🛡️ *(ADMIN)*' : ''}\n` +
-        `📧 ${user.email}\n` +
-        `🚚 Driver: ${user.driverNama || '—'}\n` +
-        `💰 Saldo : *${formatRupiah(wallet.getBalance(user.id))}*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Akun, saldo & riwayat transaksinya akan *DIHAPUS PERMANEN*.\n` +
-        `_(Dicadangkan otomatis sebelum dihapus.)_\n\n` +
-        `✅ Ketik \`/hapusakun ya\` untuk lanjut\n` +
-        `🚫 Ketik \`/hapusakun batal\` untuk membatalkan\n\n_Berlaku 3 menit._`
-    );
+    const saldo = wallet.getBalance(user.id);
+
+    return msg.reply(kartu({
+        judul: `⚠️ *KONFIRMASI HAPUS AKUN*`,
+        isi: [
+            `👤 ${tebal(user.nama)}${user.role === 'admin' ? ' 🛡️ *(ADMIN)*' : ''}`,
+            cabang([
+                `📧 ${user.email}`,
+                `🚚 Driver: ${user.driverNama || 'belum tertaut'}`,
+                `💰 Saldo: ${tebal(formatRupiah(saldo))}`,
+            ]),
+            ``,
+            `Yang akan ${tebal('DIHAPUS PERMANEN')}:`,
+            cabang(['Akun & kata sandi', 'Saldo & riwayat transaksi', 'Sesi login WhatsApp']),
+            saldo > 0 ? `\n🔴 ${miring(`Saldo ${formatRupiah(saldo)} akan hangus.`)}` : null,
+            user.driverNama
+                ? `📌 ${miring(`Data driver "${user.driverNama}" TIDAK ikut terhapus.`)}`
+                : null,
+        ].filter((v) => v !== null),
+        kaki: [
+            `🛟 ${miring('Dicadangkan otomatis sebelum dihapus.')}`,
+            ``,
+            `✅ Lanjut: ${kode('/hapusakun ya')}`,
+            `🚫 Batal: ${kode('/hapusakun batal')}`,
+            ``,
+            `⏳ ${miring('Berlaku 3 menit.')}`,
+        ],
+    }));
 }
 
 /**
