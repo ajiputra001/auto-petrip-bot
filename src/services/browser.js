@@ -117,7 +117,90 @@ async function tutupBrowser(browser) {
 async function createPage(browser) {
     const page = await browser.newPage();
     await page.setUserAgent(USER_AGENT);
+    // Tanpa viewport eksplisit, Chrome headless memakai 800x600. Form K3 jadi
+    // terlalu sempit sehingga tombol/field sering tertutup & klik meleset.
+    await page.setViewport({ width: 1366, height: 900 });
     return page;
+}
+
+/**
+ * Buka URL dengan retry. Google kadang memutus koneksi (ERR_CONNECTION_CLOSED)
+ * saat beberapa sesi membuka form berurutan dari IP VPS yang sama.
+ * @param {import('puppeteer').Page} page
+ * @param {string} url
+ * @param {number} timeout
+ * @param {number} percobaan
+ */
+async function bukaHalaman(page, url, timeout, percobaan = 3) {
+    let lastError;
+    for (let i = 1; i <= percobaan; i++) {
+        try {
+            await page.goto(url, { waitUntil: 'networkidle2', timeout });
+            return;
+        } catch (error) {
+            lastError = error;
+            logger.warn('BROWSER', `Gagal membuka form (percobaan ${i}/${percobaan}): ${error.message}`);
+            if (i < percobaan) await delay(i * 4000);
+        }
+    }
+    throw new Error(`Tidak bisa membuka Google Form: ${lastError.message}`);
+}
+
+/**
+ * Tutup dialog/overlay yang menghalangi klik.
+ *
+ * Google Form kini menyimpan draf jawaban otomatis. Bila akun yang sama membuka
+ * form di dua sesi, muncul dialog "Progres disimpan — Perbarui ke draf terbaru".
+ * Dialog ini menangkap semua pointer event, sehingga klik Puppeteer gagal dengan
+ * "Node is either not clickable" lalu alur berikutnya ikut timeout.
+ *
+ * Tombol "Perbarui" sengaja TIDAK diklik: itu akan memuat draf sesi lain dan
+ * menimpa data driver yang sedang diisi. Dialog cukup ditutup.
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<boolean>} true bila ada dialog yang ditutup
+ */
+async function tutupDialogGangguan(page) {
+    try {
+        const adaDialog = await page.evaluate(() =>
+            !!document.querySelector('[role="dialog"], [role="alertdialog"]')
+        );
+        if (!adaDialog) return false;
+
+        await page.keyboard.press('Escape');
+        await delay(800);
+
+        // Escape tidak selalu menutup dialog draf → buang node-nya beserta
+        // backdrop agar halaman bisa diklik lagi.
+        const sisa = await page.evaluate(() => {
+            let dibuang = 0;
+            document.querySelectorAll('[role="dialog"], [role="alertdialog"]').forEach((d) => {
+                const teks = d.innerText || '';
+                if (/progres disimpan|draf|draft/i.test(teks)) {
+                    d.remove();
+                    dibuang++;
+                }
+            });
+            // Backdrop gelap yang tetap menutupi layar setelah dialog hilang
+            document.querySelectorAll('div').forEach((el) => {
+                const s = getComputedStyle(el);
+                if (
+                    s.position === 'fixed' &&
+                    parseInt(s.zIndex || '0', 10) > 100 &&
+                    el.clientHeight >= window.innerHeight * 0.9 &&
+                    !el.querySelector('input, [role="button"], [role="radio"], [role="checkbox"]')
+                ) {
+                    el.remove();
+                    dibuang++;
+                }
+            });
+            return dibuang;
+        });
+
+        if (sisa > 0) logger.debug('BROWSER', `${sisa} overlay draf Google Form ditutup.`);
+        return true;
+    } catch (e) {
+        return false;
+    }
 }
 
 /**
@@ -183,6 +266,9 @@ async function injectCookies(page, cookiePath) {
  * @param {number} timeout - Timeout dalam ms
  */
 async function klikTombolTeks(page, teksIndo, teksInggris, timeout = 45000) {
+    // Dialog draf bisa muncul kapan saja & memblokir klik → bersihkan dulu.
+    await tutupDialogGangguan(page);
+
     // Tunggu tombol muncul
     await page.waitForFunction(
         (t1, t2) => {
@@ -202,13 +288,47 @@ async function klikTombolTeks(page, teksIndo, teksInggris, timeout = 45000) {
             if (text && (text.trim() === teksIndo || text.trim() === teksInggris)) {
                 await page.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), btn);
                 await delay(800);
-                await btn.click({ delay: 50 });
-                return;
+                try {
+                    await btn.click({ delay: 50 });
+                } catch (e) {
+                    // "Node is either not clickable" = masih ada overlay.
+                    // Bersihkan lalu klik lewat JS yang menembus hit-testing.
+                    await tutupDialogGangguan(page);
+                    await page.evaluate(el => el.click(), btn);
+                }
+                return true;
             }
         } catch (e) {
             // Element mungkin sudah stale, lanjutkan
         }
     }
+
+    throw new Error(`Tombol "${teksIndo}" ditemukan tapi gagal diklik.`);
+}
+
+/**
+ * Klik elemen (radio/checkbox) berdasarkan daftar aria-label yang mungkin.
+ * @param {import('puppeteer').Page} page
+ * @param {string[]} labels - kandidat aria-label, dicoba berurutan
+ * @returns {Promise<boolean>} true bila ada yang terklik
+ */
+async function klikAriaLabel(page, labels) {
+    for (const label of labels) {
+        const el = await page.$(`div[aria-label="${label}"]`);
+        if (!el) continue;
+        try {
+            await page.evaluate(e => e.scrollIntoView({ block: 'center' }), el);
+            await delay(300);
+            try {
+                await el.click();
+            } catch (e) {
+                await tutupDialogGangguan(page);
+                await page.evaluate(e2 => e2.click(), el);
+            }
+            return true;
+        } catch (e) { /* coba label berikutnya */ }
+    }
+    return false;
 }
 
 /**
@@ -222,13 +342,25 @@ async function ketikAman(page, element, teks) {
     await delay(500);
 
     // Clear existing content
-    await element.click({ clickCount: 3 });
+    try {
+        await element.click({ clickCount: 3 });
+    } catch (e) {
+        await tutupDialogGangguan(page);
+        await element.click({ clickCount: 3 });
+    }
     await page.keyboard.press('Backspace');
 
     // Ketik karakter per karakter dengan delay random
-    for (const char of teks) {
+    for (const char of String(teks)) {
         await element.type(char);
         await delay(Math.floor(Math.random() * 50) + 30);
+    }
+
+    // Verifikasi isi field benar-benar masuk. Bila form me-reset halaman
+    // (konflik draf), nilai bisa kosong/tercampur field lain.
+    const nilai = await page.evaluate(el => el.value, element);
+    if (nilai.trim() !== String(teks).trim()) {
+        throw new Error(`Input tidak sesuai (diharapkan "${teks}", terbaca "${nilai}"). Halaman form kemungkinan ter-reset.`);
     }
 }
 
@@ -236,7 +368,10 @@ module.exports = {
     launchBrowser,
     tutupBrowser,
     createPage,
+    bukaHalaman,
     injectCookies,
+    tutupDialogGangguan,
     klikTombolTeks,
+    klikAriaLabel,
     ketikAman,
 };

@@ -6,7 +6,7 @@ const path = require('path');
 const cron = require('node-cron');
 const config = require('./config');
 const logger = require('./utils/logger');
-const { prosesAbsenMassal } = require('./services/form-filler');
+const { prosesAbsenMassal, sedangAbsen } = require('./services/form-filler');
 const { bersihkanLogLama, bersihkanZombieChrome } = require('./utils/self-healing');
 const { bacaJSON, tulisJSON, ensureDir, withTimeout } = require('./utils/helpers');
 
@@ -80,8 +80,8 @@ function _menitJadwal(schedule) {
  * @param {string} alasan - 'cron' | 'catchup'
  */
 async function jalankanAbsenOtomatis(client, alasan = 'cron') {
-    if (sedangBerjalan) {
-        logger.warn('SCHEDULER', `Absen otomatis (${alasan}) dilewati: siklus sebelumnya masih berjalan.`);
+    if (sedangBerjalan || sedangAbsen()) {
+        logger.warn('SCHEDULER', `Absen otomatis (${alasan}) dilewati: siklus absen lain masih berjalan.`);
         return;
     }
 
@@ -261,6 +261,11 @@ function initScheduler(client) {
     } else {
         const cekTerlewat = async () => {
             try {
+                // Jangan menyela absen manual (/absenmanual) yang sedang jalan:
+                // dua sesi pada akun Google yang sama akan saling menimpa draf
+                // jawaban form dan membuat semuanya gagal.
+                if (sedangBerjalan || sedangAbsen()) return;
+
                 const state = _bacaState();
                 if (state.tanggal === _tanggalLokal() && state.selesai) return;
 
