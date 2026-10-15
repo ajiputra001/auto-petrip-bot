@@ -22,6 +22,7 @@ const {
 } = require('./browser');
 const { generasiRingkasanAI } = require('./ai-summary');
 const ProgressTracker = require('./progress');
+const { buatSesiPanel } = ProgressTracker;
 const wallet = require('../wallet');
 const auth = require('../auth');
 const { getSenderWa } = require('../commands/akun');
@@ -338,7 +339,7 @@ async function _tandaTanganPakta(page, driver) {
  * @param {Object} driver - Data driver
  * @param {Object|null} liveMsgObj - Live message untuk progress (null = tanpa WA update)
  * @param {string|null} senderWa - Nomor HP pengirim absen (untuk cek saldo)
- * @param {{ skipCharge?: boolean, chatId?: string|null }} options - skipCharge: lewati potong saldo (override admin)
+ * @param {{ skipCharge?: boolean, chatId?: string|null, sesiPanel?: Object }} options - skipCharge: lewati potong saldo (override admin)
  * @returns {Promise<Object>} Hasil { status, alasan, statusKerja, ringkasanAI }
  */
 async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = null, options = {}) {
@@ -347,7 +348,10 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
     const isLibur = db.isLiburHariIni(driver.nama);
     const ringkasanAI = generasiRingkasanAI(driver, isLibur);
-    const progress = new ProgressTracker(waClient, liveMsgObj, driver, isLibur, options.chatId || null);
+    // Satu siklus absen = satu panel. Sesi dibagi antar driver supaya handle
+    // pesan hasil pemulihan tidak hilang dan panel tidak pernah dikirim dobel.
+    const sesiPanel = options.sesiPanel || buatSesiPanel(options.chatId || null, liveMsgObj);
+    const progress = new ProgressTracker(waClient, sesiPanel, driver, isLibur);
 
     // Akun yang saldonya dipotong — dipakai untuk refund bila absen gagal.
     let akunTerpotong = null;
@@ -833,6 +837,9 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
         logger.info('PROGRESS', `liveMsgObj created - ChatJID: ${liveMsgObj?.id?.remote || 'N/A'}, ID: ${liveMsgObj?.id?._serialized || 'N/A'}, fromMe: ${liveMsgObj?.fromMe}, chatId: ${targetChatId}, senderWa: ${senderWa || 'N/A'}`);
     }
 
+    // Satu panel progres dipakai bersama seluruh driver pada siklus ini
+    const sesiPanel = buatSesiPanel(originalMsg ? targetChatId : null, liveMsgObj);
+
     // Proses setiap driver
     const rekapLaporan = [];
     let suksesCount = 0;
@@ -850,6 +857,7 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
                 isiGoogleForm(waClient, driver, liveMsgObj, senderWa, {
                     ...options,
                     chatId: originalMsg ? targetChatId : null,
+                    sesiPanel,
                 }),
                 DRIVER_TIMEOUT_MS,
                 `isiGoogleForm(${driver.nama})`
@@ -884,22 +892,17 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
         }
     }
 
-    // Kirim pesan akhir ke live msg. Dibungkus timeout: getMessageById/edit bisa
-    // menggantung di VPS dan menahan eksekusi sebelum rekap sempat dikirim.
-    if (liveMsgObj && liveMsgObj.id && liveMsgObj.id._serialized) {
+    // Tutup panel progres lewat sesi bersama, BUKAN lewat liveMsgObj awal.
+    // liveMsgObj bisa sudah basi bila di tengah siklus panel dikirim ulang;
+    // memakainya di sini membuat pesan penutup nyasar jadi panel kedua.
+    if (sesiPanel.msg || sesiPanel.storeMsgId || sesiPanel.chatId) {
         try {
-            const freshMsg = await withTimeout(
-                waClient.getMessageById(liveMsgObj.id._serialized),
+            const penutup = new ProgressTracker(waClient, sesiPanel, { nama: 'SISTEM', id: '-' }, false);
+            await withTimeout(
+                penutup.finish(`🚨 *ENGINE TERMINATED*\nTugas selesai. Menghimpun rekapitulasi data...`),
                 15000,
-                'getMessageById(final)'
+                'finish(final)'
             );
-            if (freshMsg) {
-                await withTimeout(
-                    freshMsg.edit(`🚨 *ENGINE TERMINATED*\nTugas selesai. Menghimpun rekapitulasi data...`),
-                    15000,
-                    'edit(final)'
-                );
-            }
         } catch (e) {
             logger.debug('REKAP', `Pesan akhir live msg dilewati: ${e.message}`);
         }

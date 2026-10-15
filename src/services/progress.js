@@ -6,31 +6,76 @@ const { delay } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { kartu, tebal, miring, cabang } = require('../utils/tampilan');
 
+// Baris judul panel progres. WAJIB sama persis di pesan loader awal maupun di
+// setiap pembaruan: pencarian pesan di store browser mencocokkan baris pertama,
+// jadi judul yang berubah-ubah membuat panel "hilang" lalu dikirim ulang.
+const JUDUL_PANEL = '🤖 *AUTOBOT — PROSES ABSEN*';
+
+// Penanda untuk menemukan kembali panel di store browser WA Web.
+// Harus mencakup teks loader awal DAN teks panel setelah diperbarui — kalau
+// tidak, panel yang sudah di-edit jadi tak dikenali dan bot mengirim duplikat.
+const PENANDA_PANEL = [
+    'AUTOBOT — PROSES ABSEN',
+    'SYSTEM RUNNING',
+    'ENGINE TERMINATED',
+];
+
+/**
+ * Sesi panel progres yang dipakai BERSAMA oleh seluruh driver dalam satu siklus.
+ *
+ * Sebelumnya tiap driver memegang salinan handle pesannya sendiri. Begitu satu
+ * driver terpaksa mengirim pesan baru (fallback), driver berikutnya masih
+ * memakai handle lama yang sudah basi lalu ikut mengirim pesan baru lagi —
+ * inilah yang membuat panel progres tampil dobel di WhatsApp.
+ *
+ * @param {string|null} chatId - Tujuan chat
+ * @param {Object|null} liveMsgObj - Pesan loader awal (boleh null)
+ * @returns {Object} Sesi panel bersama
+ */
+function buatSesiPanel(chatId = null, liveMsgObj = null) {
+    return {
+        msg: liveMsgObj || null,
+        chatId: chatId ||
+            (liveMsgObj && (liveMsgObj.safeChatId || (liveMsgObj.id && liveMsgObj.id.remote))) ||
+            null,
+        // ID pesan hasil pemulihan dari store, dipakai bila objek Message tak tersedia
+        storeMsgId: null,
+        // Metode edit yang terbukti berhasil ('liveMsg' | 'browser'), agar tak coba ulang yang gagal
+        metodeEdit: null,
+    };
+}
+
 /**
  * Class untuk mengelola live progress update di WhatsApp
  */
 class ProgressTracker {
     /**
      * @param {Object} waClient - WhatsApp client instance
-     * @param {Object|null} liveMsgObj - Message object untuk di-edit (null = no WA output)
+     * @param {Object} sesi - Sesi panel bersama dari buatSesiPanel()
      * @param {Object} driver - Data driver yang sedang diproses
      * @param {boolean} isLibur - Status libur driver
-     * @param {string|null} chatId - Tujuan chat; dipakai bila liveMsgObj gagal dibuat
      */
-    constructor(waClient, liveMsgObj, driver, isLibur, chatId = null) {
+    constructor(waClient, sesi, driver, isLibur) {
         this.client = waClient;
-        this.liveMsg = liveMsgObj;
+        this.sesi = sesi || buatSesiPanel();
         this.driver = driver;
         this.isLibur = isLibur;
-        // sendMessage() bisa mengembalikan undefined pada chat @lid walau pesan terkirim,
-        // jadi chatId disimpan agar progress tetap bisa dikirim/diedit.
-        this.chatId = chatId || (liveMsgObj && (liveMsgObj.safeChatId || (liveMsgObj.id && liveMsgObj.id.remote))) || null;
-        // ID pesan hasil pemulihan dari store, dipakai bila objek Message tak tersedia
-        this.storeMsgId = null;
-        // Metode edit yang terbukti berhasil ('liveMsg' | 'browser'), agar tak coba ulang yang gagal
-        this.metodeEdit = null;
         this.startTime = Date.now();
     }
+
+    // Semua state pesan hidup di `this.sesi` supaya hasil pemulihan satu driver
+    // langsung dipakai driver berikutnya (satu siklus = satu panel).
+    get liveMsg() { return this.sesi.msg; }
+    set liveMsg(v) { this.sesi.msg = v; }
+
+    get chatId() { return this.sesi.chatId; }
+    set chatId(v) { this.sesi.chatId = v; }
+
+    get storeMsgId() { return this.sesi.storeMsgId; }
+    set storeMsgId(v) { this.sesi.storeMsgId = v; }
+
+    get metodeEdit() { return this.sesi.metodeEdit; }
+    set metodeEdit(v) { this.sesi.metodeEdit = v; }
 
     /**
      * Update progress ke WhatsApp & console
@@ -81,7 +126,7 @@ class ProgressTracker {
         }
 
         const template = kartu({
-            judul: `🤖 *AUTOBOT — PROSES ABSEN*`,
+            judul: JUDUL_PANEL,
             isi: [
                 `👤 ${tebal(this.driver.nama)}`,
                 cabang([
@@ -257,7 +302,7 @@ class ProgressTracker {
 
         try {
             const serialized = await this._withTimeout(
-                this.client.pupPage.evaluate((targetChat) => {
+                this.client.pupPage.evaluate((targetChat, penanda) => {
                     try {
                         const Msg = window.require('WAWebCollections').Msg;
                         const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
@@ -280,15 +325,13 @@ class ProgressTracker {
                                 if (remoteUser && remoteUser !== targetUser) return false;
                             }
                             const body = m.body || m.caption || '';
-                            return body.includes('SYSTEM RUNNING') ||
-                                body.includes('AJIPUTRA AUTOMATION ENGINE') ||
-                                body.includes('LIVE TELEMETRY');
+                            return penanda.some((p) => body.includes(p));
                         });
                         return found ? idStr(found.id) : null;
                     } catch (err) {
                         return null;
                     }
-                }, chatId),
+                }, chatId, PENANDA_PANEL),
                 timeoutMs,
                 'pupPage.evaluate(findLastMsg)'
             );
@@ -309,7 +352,7 @@ class ProgressTracker {
 
         try {
             const msgKey = (this.liveMsg && this.liveMsg.id && this.liveMsg.id.id) || '';
-            return await this._withTimeout(this.client.pupPage.evaluate(async (msgId, rawKey, newContent) => {
+            return await this._withTimeout(this.client.pupPage.evaluate(async (msgId, rawKey, newContent, penanda) => {
                 try {
                     const Msg = window.require('WAWebCollections').Msg;
                     const models = Msg.models || (Msg.toArray ? Msg.toArray() : []);
@@ -333,17 +376,13 @@ class ProgressTracker {
                         return false;
                     });
 
-                    // Robust fallback: cari pesan outgoing terakhir yang memiliki teks loader bot
+                    // Robust fallback: cari pesan outgoing terakhir yang memiliki teks panel bot
                     if (!targetMsg) {
                         targetMsg = [...models].reverse().find(m => {
                             if (!m || !m.id) return false;
                             const isFromMe = m.id.fromMe || m.fromMe;
                             const body = m.body || m.caption || '';
-                            return isFromMe && (
-                                body.includes('SYSTEM RUNNING') ||
-                                body.includes('AJIPUTRA AUTOMATION ENGINE') ||
-                                body.includes('LIVE TELEMETRY')
-                            );
+                            return isFromMe && penanda.some((p) => body.includes(p));
                         });
                     }
 
@@ -358,7 +397,7 @@ class ProgressTracker {
                     console.error('Direct edit error in browser:', err);
                 }
                 return false;
-            }, serializedId, msgKey, teks), 8000, 'pupPage.evaluate(edit)');
+            }, serializedId, msgKey, teks, PENANDA_PANEL), 8000, 'pupPage.evaluate(edit)');
         } catch (err) {
             logger.debug('PROGRESS', `Direct edit browser gagal: ${err.message}`);
             return false;
@@ -375,3 +414,5 @@ class ProgressTracker {
 }
 
 module.exports = ProgressTracker;
+module.exports.buatSesiPanel = buatSesiPanel;
+module.exports.JUDUL_PANEL = JUDUL_PANEL;
