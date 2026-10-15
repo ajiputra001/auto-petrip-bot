@@ -8,6 +8,7 @@ const path = require('path');
 const db = require('../database');
 const config = require('../config');
 const auth = require('../auth');
+const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
 
 /**
  * Hitung total ukuran & jumlah file dalam folder
@@ -63,29 +64,55 @@ async function handleStatus(msg) {
     const screenshotsStats = getDirStats(config.screenshotDir);
     const logSize = getLogSize();
 
-    let teks = `⚙️ *SERVER DIAGNOSTIC STATUS*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-    teks += `🖥️ *Sistem & OS*\n`;
-    teks += `   • OS       : ${platform}\n`;
-    teks += `   • CPU      : ${cpuModel}\n`;
-    teks += `   • Cores    : ${cpuCount} vCPU\n`;
-    teks += `   • Uptime   : ${uptime}\n\n`;
-    teks += `📊 *Memori RAM*\n`;
-    teks += `   • Terpakai : ${usedRAM} MB / ${totalRAM} MB (${persenUsed}%)\n`;
-    teks += `   • Bebas    : ${freeRAM} MB\n\n`;
-    teks += `💾 *Penyimpanan Bot*\n`;
-    teks += `   • Cookies  : ${cookiesStats.count} file (${cookiesStats.sizeMB} MB)\n`;
-    teks += `   • SS Reaksi: ${screenshotsStats.count} file (${screenshotsStats.sizeMB} MB)\n`;
-    teks += `   • Log File : ${logSize}\n\n`;
-    teks += `🤖 *Bot Engine*\n`;
-    teks += `   • Version  : v2.0 Sovereign Payment Core\n`;
-    teks += `   • Drivers  : ${totalDrivers} terdaftar\n`;
-    teks += `   • Users    : ${auth.listUsers().length} akun\n`;
-    teks += `   • Dashboard: ${config.publicBaseUrl}\n`;
-    teks += `   • Engine   : 🟢 Running (Standby)\n`;
-    teks += `\n━━━━━━━━━━━━━━━━━━━━━━━━`;
+    // Driver yang berkasnya belum lengkap adalah penyebab absen gagal paling
+    // sering, jadi ikut ditampilkan di diagnostik.
+    const drivers = db.getAllDrivers();
+    const belumSiap = drivers.filter((d) => !db.isCookieReady(d) || !db.isScreenshotReady(d));
 
-    return msg.reply(teks);
+    const ikonRam = persenUsed >= 90 ? '🔴' : persenUsed >= 75 ? '🟡' : '🟢';
+
+    return msg.reply(
+        kartu({
+            judul: `⚙️ *DIAGNOSTIK SERVER*`,
+            isi: [
+                `🖥️ *Sistem & OS*`,
+                cabang([
+                    `OS: ${platform}`,
+                    `CPU: ${cpuModel}`,
+                    `Core: ${cpuCount} vCPU`,
+                    `Uptime: ${uptime}`,
+                ]),
+                ``,
+                `${ikonRam} *Memori RAM*`,
+                cabang([
+                    `Terpakai: ${tebal(`${usedRAM} MB`)} / ${totalRAM} MB (${persenUsed}%)`,
+                    `Bebas: ${freeRAM} MB`,
+                ]),
+                ``,
+                `💾 *Penyimpanan Bot*`,
+                cabang([
+                    `Cookie: ${cookiesStats.count} berkas (${cookiesStats.sizeMB} MB)`,
+                    `Foto reaksi: ${screenshotsStats.count} berkas (${screenshotsStats.sizeMB} MB)`,
+                    `Log: ${logSize}`,
+                ]),
+                ``,
+                `🤖 *Bot Engine*`,
+                cabang([
+                    `Versi: v2.0 Sovereign Payment Core`,
+                    `Driver: ${totalDrivers} terdaftar`,
+                    `User: ${auth.listUsers().length} akun`,
+                    `Dashboard: ${config.publicBaseUrl}`,
+                    `Status: 🟢 ${tebal('Running')} (standby)`,
+                ]),
+            ],
+            kaki: [
+                belumSiap.length
+                    ? `⚠️ ${tebal(`${belumSiap.length} driver`)} belum lengkap: ${belumSiap.map((d) => d.nama).join(', ')}`
+                    : `✅ ${miring('Semua berkas driver lengkap.')}`,
+                `💡 Detail driver: ${kode('/listdriver')}`,
+            ],
+        })
+    );
 }
 
 /**

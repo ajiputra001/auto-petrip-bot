@@ -9,6 +9,7 @@ const payment = require('../payment');
 const { formatRupiah, delay } = require('../utils/helpers');
 const { MessageMedia } = require('whatsapp-web.js');
 const logger = require('../utils/logger');
+const { kartu, kode, tebal, miring, cabang, rupiahBertanda } = require('../utils/tampilan');
 
 /**
  * Menyimpan sesi login WA → userId (in-memory + persisten)
@@ -144,18 +145,27 @@ async function handleDaftar(msg, pesan) {
     // Auto login setelah daftar
     setWaSession(getSenderWa(msg), result.user.id);
 
-    let teks = `✅ *AKUN BERHASIL DIBUAT*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Nama  : *${result.user.nama}*\n`;
-    teks += `🚚 Driver: *${result.user.driverNama}*\n`;
-    teks += `📧 Email : ${result.user.email}\n`;
-    teks += `💰 Saldo : ${formatRupiah(wallet.getBalance(result.user.id))}\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `🔓 Anda sudah otomatis login.\n`;
-    teks += `💡 Ketik \`/topup\` untuk isi saldo.\n`;
-    teks += `💡 Ketik \`/saldo\` untuk cek saldo.`;
-
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `✅ *AKUN BERHASIL DIBUAT*`,
+            isi: [
+                `👤 ${tebal(result.user.nama)}`,
+                cabang([
+                    `📧 Email: ${result.user.email}`,
+                    `🚚 Driver: ${result.user.driverNama}`,
+                    `💰 Saldo: ${tebal(formatRupiah(wallet.getBalance(result.user.id)))}`,
+                ]),
+            ],
+            kaki: [
+                `🔓 ${miring('Anda sudah otomatis login.')}`,
+                ``,
+                `📌 ${tebal('Langkah berikutnya:')}`,
+                `1️⃣ Isi saldo dengan ${kode('/topup')}`,
+                `2️⃣ Cek saldo dengan ${kode('/saldo')}`,
+                `3️⃣ Lihat semua fitur di ${kode('/menu')}`,
+            ],
+        })
+    );
 }
 
 /**
@@ -179,14 +189,28 @@ async function handleLogin(msg, pesan) {
 
     setWaSession(getSenderWa(msg), result.user.id);
 
-    let teks = `✅ *LOGIN BERHASIL*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Halo *${result.user.nama}*!\n`;
-    teks += `💰 Saldo : ${formatRupiah(wallet.getBalance(result.user.id))}\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `💡 \`/saldo\` cek saldo | \`/topup\` isi saldo`;
+    const saldo = wallet.getBalance(result.user.id);
+    const isAdmin = result.user.role === 'admin';
 
-    return msg.reply(teks);
+    return msg.reply(
+        kartu({
+            judul: `✅ *LOGIN BERHASIL*`,
+            isi: [
+                `👤 Halo ${tebal(result.user.nama)}!${isAdmin ? ' 🛡️' : ''}`,
+                cabang([
+                    isAdmin ? `🛡️ Peran: ${tebal('Admin')}` : `👤 Peran: Driver`,
+                    result.user.driverNama
+                        ? `🚚 Driver: ${result.user.driverNama}`
+                        : `⚠️ Driver: belum tertaut`,
+                    `💰 Saldo: ${tebal(formatRupiah(saldo))}`,
+                ]),
+            ],
+            kaki: [
+                `💡 ${kode('/menu')} semua fitur  ·  ${kode('/saldo')} cek saldo`,
+                isAdmin ? `🛡️ ${kode('/admin')} buka panel admin` : null,
+            ].filter(Boolean),
+        })
+    );
 }
 
 /**
@@ -238,24 +262,47 @@ async function handleSaldo(msg) {
     const balance = wallet.getBalance(userId);
     const txs = wallet.getTransactions(userId, 5);
 
-    let teks = `💰 *SALDO AKUN*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `👤 Nama  : *${user.nama}*\n`;
-    teks += `🚚 Driver : ${user.driverNama || '-'}\n`;
-    teks += `📧 Email : ${user.email}\n`;
-    teks += `💰 Saldo : *${formatRupiah(balance)}*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    // Sisa absen jauh lebih berguna daripada angka saldo mentah.
+    const harga = Number(config.pricePerAbsen) || 0;
+    const sisaAbsen = harga > 0 ? Math.floor(balance / harga) : null;
 
-    if (txs.length) {
-        teks += `📜 *Transaksi Terakhir:*\n`;
-        txs.forEach(t => {
-            const sign = t.amount >= 0 ? '+' : '';
-            teks += `• ${t.description}: ${sign}${formatRupiah(t.amount)}\n`;
-        });
+    const isi = [
+        `👤 ${tebal(user.nama)}`,
+        cabang([
+            `📧 Email: ${user.email}`,
+            user.driverNama ? `🚚 Driver: ${user.driverNama}` : `⚠️ Driver: belum tertaut`,
+        ]),
+        ``,
+        `💰 Saldo: ${tebal(formatRupiah(balance))}`,
+    ];
+
+    if (sisaAbsen === null) {
+        isi.push(cabang([`🆓 Absen sedang gratis (tarif Rp 0)`]));
+    } else {
+        isi.push(cabang([
+            `🎟️ Cukup untuk ${tebal(`${sisaAbsen}x absen`)}`,
+            `🏷️ Tarif: ${formatRupiah(harga)} / absen`,
+        ]));
     }
 
-    teks += `\n💡 \`/topup\` untuk isi saldo.`;
-    return msg.reply(teks);
+    if (txs.length) {
+        isi.push(``);
+        isi.push(`📜 *Transaksi terakhir*`);
+        isi.push(cabang(txs.map((t) =>
+            `${t.amount >= 0 ? '➕' : '➖'} ${t.description}: ${rupiahBertanda(t.amount)}`
+        )));
+    }
+
+    const kaki = [];
+    if (sisaAbsen !== null && sisaAbsen < 5) {
+        kaki.push(`⚠️ ${tebal('Saldo menipis')} — isi ulang agar absen tidak terhenti.`);
+    }
+    if (!user.driverNama) {
+        kaki.push(`⚠️ ${miring('Akun belum tertaut driver, absen otomatis tidak jalan.')}`);
+    }
+    kaki.push(`💡 ${kode('/topup')} isi saldo  ·  ${kode('/riwayat')} semua transaksi`);
+
+    return msg.reply(kartu({ judul: `💰 *SALDO AKUN*`, isi, kaki }));
 }
 
 /**
@@ -298,17 +345,22 @@ async function handleTopup(msg, pesan, waClient = null) {
 
     const order = result.data;
     const totalStr = formatRupiah(order.total);
-    const feeStr = order.fee > 0 ? `\n📋 Biaya admin : ${formatRupiah(order.fee)}` : '';
 
-    // Kirim status awal
-    let teks = `💳 *PEMBAYARAN TOP-UP*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `💰 Saldo dibeli : ${formatRupiah(order.amount)}\n`;
-    teks += `🧾 Total bayar  : *${totalStr}*${feeStr}\n`;
-    teks += `⏳ Berlaku s/d  : ${order.expiryTime}\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `📲 *Scan QRIS di bawah ini untuk membayar:*\n`;
-    teks += `⏳ _Menunggu pembayaran..._`;
+    const teks = kartu({
+        judul: `💳 *PEMBAYARAN TOP-UP*`,
+        isi: [
+            `🧾 Total bayar: ${tebal(totalStr)}`,
+            cabang([
+                `💰 Saldo didapat: ${formatRupiah(order.amount)}`,
+                order.fee > 0 ? `📋 Biaya admin: ${formatRupiah(order.fee)}` : null,
+                `⏳ Berlaku s/d: ${order.expiryTime}`,
+            ].filter(Boolean)),
+        ],
+        kaki: [
+            `📲 ${tebal('Scan QRIS di bawah ini untuk membayar.')}`,
+            `⏳ ${miring('Menunggu pembayaran...')}`,
+        ],
+    });
 
     let statusMsg = await _safeReply(msg, waClient, teks);
 
@@ -364,14 +416,23 @@ async function _pollPaymentInBackground(waClient, msg, userId, orderId, amount, 
         if (status === 'PAID') {
             const user = auth.findUserById(userId);
             const balance = wallet.getBalance(userId);
-            const notif =
-                `✅ *PEMBAYARAN BERHASIL*\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `👤 ${user ? user.nama : '-'}\n` +
-                `💰 Saldo bertambah: ${formatRupiah(amount)}\n` +
-                `💵 Saldo sekarang : *${formatRupiah(balance)}*\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `🎉 Akun Anda sudah aktif & siap absen!`;
+            const harga = Number(config.pricePerAbsen) || 0;
+            const sisaAbsen = harga > 0 ? Math.floor(balance / harga) : null;
+
+            const notif = kartu({
+                judul: `✅ *PEMBAYARAN BERHASIL*`,
+                isi: [
+                    `👤 ${tebal(user ? user.nama : '-')}`,
+                    cabang([
+                        `➕ Saldo masuk: ${tebal(formatRupiah(amount))}`,
+                        `💰 Saldo kini: ${tebal(formatRupiah(balance))}`,
+                        sisaAbsen === null
+                            ? `🆓 Absen sedang gratis`
+                            : `🎟️ Cukup untuk ${sisaAbsen}x absen`,
+                    ]),
+                ],
+                kaki: [`🎉 ${miring('Akun Anda siap dipakai absen otomatis.')}`],
+            });
             try {
                 if (statusMsg && statusMsg.id) {
                     await statusMsg.edit(notif);
@@ -387,7 +448,11 @@ async function _pollPaymentInBackground(waClient, msg, userId, orderId, amount, 
         if (status === 'EXPIRED') {
             try {
                 if (statusMsg && statusMsg.id) {
-                    await statusMsg.edit(`❌ *PEMBAYARAN KEDALUWARSA*\nQRIS sudah tidak berlaku. Silakan buat top-up baru.`);
+                    await statusMsg.edit(kartu({
+                        judul: `❌ *QRIS KEDALUWARSA*`,
+                        isi: [`Kode QRIS sudah tidak berlaku dan pembayaran tidak terdeteksi.`],
+                        kaki: [`💡 Buat ulang dengan ${kode('/topup')}.`],
+                    }));
                 }
             } catch (e) { /* abaikan */ }
             return;
@@ -397,7 +462,15 @@ async function _pollPaymentInBackground(waClient, msg, userId, orderId, amount, 
     // Timeout
     try {
         if (statusMsg && statusMsg.id) {
-            await statusMsg.edit(`⏳ *WAKTU PEMBAYARAN HABIS*\nBelum terdeteksi pembayaran. Cek saldo dengan \`/saldo\` untuk memastikan.`);
+            await statusMsg.edit(kartu({
+                judul: `⏳ *PEMANTAUAN DIHENTIKAN*`,
+                isi: [
+                    `Pembayaran belum terdeteksi sampai batas waktu pemantauan.`,
+                    ``,
+                    `📌 ${miring('Kalau Anda sudah membayar, saldo tetap masuk otomatis.')}`,
+                ],
+                kaki: [`💡 Pastikan dengan ${kode('/saldo')}.`],
+            }));
         }
     } catch (e) { /* abaikan */ }
 }
@@ -465,14 +538,21 @@ async function _getQrBuffer(order) {
 async function _resendPendingQris(msg, waClient, order) {
     const totalStr = formatRupiah(order.total || order.amount || 0);
 
-    let teks = `⚠️ *PEMBAYARAN SEBELUMNYA MASIH PENDING*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `🆔 Order       : ${order.orderId}\n`;
-    teks += `💰 Saldo dibeli: ${formatRupiah(order.amount || 0)}\n`;
-    teks += `🧾 Total bayar : *${totalStr}*\n`;
-    teks += `⏳ Berlaku s/d : ${order.expiryTime || '-'}\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    teks += `📲 Silakan lanjutkan pembayaran QRIS berikut:`;
+    const teks = kartu({
+        judul: `⚠️ *MASIH ADA TAGIHAN BELUM DIBAYAR*`,
+        isi: [
+            `🧾 Total bayar: ${tebal(totalStr)}`,
+            cabang([
+                `🆔 Order: ${order.orderId}`,
+                `💰 Saldo didapat: ${formatRupiah(order.amount || 0)}`,
+                `⏳ Berlaku s/d: ${order.expiryTime || '-'}`,
+            ]),
+        ],
+        kaki: [
+            `📲 ${tebal('Lanjutkan pembayaran QRIS di bawah ini.')}`,
+            `📌 ${miring('Top-up baru bisa dibuat setelah tagihan ini lunas atau kedaluwarsa.')}`,
+        ],
+    });
 
     await _safeReply(msg, waClient, teks);
 
@@ -662,21 +742,65 @@ async function handleRiwayat(msg) {
 
     const txs = wallet.getTransactions(userId, 15);
     if (!txs.length) {
-        return msg.reply(`📜 *RIWAYAT TRANSAKSI*\n━━━━━━━━━━━━━━━━━━━━━━\nBelum ada transaksi.`);
+        return msg.reply(
+            kartu({
+                judul: `📜 *RIWAYAT TRANSAKSI*`,
+                isi: [`${miring('Belum ada transaksi.')}`],
+                kaki: [`💡 Mulai dengan ${kode('/topup')}.`],
+            })
+        );
     }
 
-    let teks = `📜 *RIWAYAT TRANSAKSI*\n`;
-    teks += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-    txs.forEach((t, i) => {
-        const sign = t.amount >= 0 ? '+' : '';
-        const icon = t.type === 'TOPUP' ? '💰' : t.type === 'POTONG_ABSEN' ? '🤖' : '📝';
-        const date = new Date(t.createdAt).toLocaleString('id-ID');
-        teks += `${i + 1}. ${icon} ${t.description}\n`;
-        teks += `   ${sign}${formatRupiah(t.amount)} | ${date}\n\n`;
-    });
-    teks += `━━━━━━━━━━━━━━━━━━━━━━`;
+    const ikon = (t) =>
+        t.type === 'TOPUP' ? '💰'
+            : t.type === 'POTONG_ABSEN' ? '🤖'
+                : t.type === 'REFUND' ? '↩️'
+                    : t.amount >= 0 ? '➕' : '➖';
 
-    return msg.reply(teks);
+    // Dikelompokkan per tanggal supaya daftar panjang tetap mudah dibaca.
+    const perTanggal = new Map();
+    for (const t of txs) {
+        const d = new Date(t.createdAt);
+        const tgl = d.toLocaleDateString('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+        });
+        const jam = d.toLocaleTimeString('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+
+        if (!perTanggal.has(tgl)) perTanggal.set(tgl, []);
+        perTanggal.get(tgl).push(
+            `${ikon(t)} ${jam} · ${t.description}: ${rupiahBertanda(t.amount)}`
+        );
+    }
+
+    const isi = [];
+    let ke = 0;
+    for (const [tgl, baris] of perTanggal) {
+        if (ke++ > 0) isi.push(``);
+        isi.push(`📅 *${tgl}*`);
+        isi.push(cabang(baris));
+    }
+
+    const masuk = txs.filter((t) => t.amount > 0).reduce((n, t) => n + t.amount, 0);
+    const keluar = txs.filter((t) => t.amount < 0).reduce((n, t) => n + Math.abs(t.amount), 0);
+
+    return msg.reply(
+        kartu({
+            judul: `📜 *RIWAYAT TRANSAKSI*`,
+            isi,
+            kaki: [
+                `➕ Masuk: ${tebal(formatRupiah(masuk))}  ·  ➖ Keluar: ${tebal(formatRupiah(keluar))}`,
+                `💰 Saldo kini: ${tebal(formatRupiah(wallet.getBalance(userId)))}`,
+                `📌 ${miring(`Menampilkan ${txs.length} transaksi terakhir.`)}`,
+            ],
+        })
+    );
 }
 
 /**
