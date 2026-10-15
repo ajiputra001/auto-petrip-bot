@@ -48,6 +48,9 @@ const config = {
     dataDir: path.join(ROOT_DIR, 'data'),
     cookieDir: path.join(ROOT_DIR, 'cookies'),
     screenshotDir: path.join(ROOT_DIR, 'screenshots'),
+    // Salinan sementara untuk diunggah. Dipisah dari screenshots/ supaya
+    // pembersihan otomatis tidak mungkin menyentuh foto asli milik driver.
+    tempScreenshotDir: path.join(ROOT_DIR, 'screenshots', '.tmp'),
     sessionDir: path.join(ROOT_DIR, 'sessions'),
 
     // ── File Database ──

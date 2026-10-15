@@ -63,18 +63,16 @@ function bersihkanSisaCrash() {
         }
     }
 
-    // 3. Bersihkan file temporary screenshot di folder screenshots/
+    // 3. Bersihkan salinan sementara screenshot.
+    //    Hanya menyentuh folder .tmp — foto asli driver di screenshots/
+    //    tidak pernah tersentuh walau namanya mirip.
     try {
-        const ssDir = config.screenshotDir;
-        if (fs.existsSync(ssDir)) {
-            const files = fs.readdirSync(ssDir);
+        const tmpDir = config.tempScreenshotDir;
+        if (fs.existsSync(tmpDir)) {
             let cleaned = 0;
-            for (const file of files) {
-                // Hanya hapus file temporary (yang ada timestamp milidetik)
-                if (file.startsWith('Screenshot_') && /^\d{13}/.test(file.split('_')[1])) {
-                    fs.unlinkSync(path.join(ssDir, file));
-                    cleaned++;
-                }
+            for (const file of fs.readdirSync(tmpDir)) {
+                fs.unlinkSync(path.join(tmpDir, file));
+                cleaned++;
             }
             if (cleaned > 0) {
                 logger.debug('SELF-HEALING', `${cleaned} file temporary screenshot dibersihkan.`);

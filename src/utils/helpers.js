@@ -85,13 +85,32 @@ function getHariIni() {
 }
 
 /**
- * Generate nama file screenshot format Android
+ * Generate nama file screenshot meniru format galeri Android:
+ * `Screenshot_YYYYMMDD_HHMMSS.jpg` dengan waktu Asia/Jakarta.
+ *
+ * Nama ikut jam saat absen dijalankan, jadi setiap hari berbeda dan tidak
+ * terlihat seperti foto lama yang diunggah berulang-ulang.
+ *
  * @returns {string} Nama file unik
  */
 function generateNamaScreenshot() {
-    const ts = Date.now();
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    return `Screenshot_${ts}_${rand}.jpg`;
+    const bagian = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    })
+        .formatToParts(new Date())
+        .reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+
+    const tanggal = `${bagian.year}${bagian.month}${bagian.day}`;
+    const jam = `${bagian.hour === '24' ? '00' : bagian.hour}${bagian.minute}${bagian.second}`;
+
+    return `Screenshot_${tanggal}_${jam}.jpg`;
 }
 
 /**
