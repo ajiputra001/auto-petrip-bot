@@ -14,6 +14,8 @@ Aplikasi WhatsApp Bot pintar untuk mengotomatisasi pengisian Google Form K3 SPX 
 * **🆕 Sistem Akun (Email + Password)**: Driver punya akun sendiri dengan login aman (hash password scrypt + token HMAC).
 * **🆕 Payment Gateway QRIS (AutoGoPay)**: Top-up saldo via QRIS dinamis, auto-verifikasi pembayaran via webhook, dan pemotongan saldo otomatis per proses absen.
 * **🆕 Web Dashboard**: Halaman login, cek saldo, top-up, dan riwayat transaksi yang responsif (mobile & desktop).
+* **🆕 Cadangan Otomatis & Pindah VPS Sekali Jalan**: Data user, saldo, driver, cookie, dan foto dibungkus jadi satu arsip yang dikirim ke WhatsApp — harian, setiap saldo masuk, dan sebelum setiap pemulihan. Pindah VPS cukup `install.sh --restore`.
+* **🆕 Installer Serba-Otomatis**: Satu perintah memasang paket sistem, Node.js 20, Chrome, swap 4 GB, PM2 + log rotate, auto-start saat reboot, lalu memverifikasi hasilnya.
 
 ---
 
@@ -35,12 +37,33 @@ cd auto-petrip-bot
 ```
 
 ### 2. Jalankan Skrip Instalasi Otomatis (Direkomendasikan)
-Kami telah menyediakan skrip instalasi otomatis yang mendukung **Debian 11, 12, 13** dan **Ubuntu 20, 22, 24**. Skrip ini akan otomatis memperbarui paket sistem, menginstal/meng-upgrade Node.js (minimal versi 18), memasang seluruh dependensi sistem operasi yang diperlukan Google Chrome secara universal, serta menginstal dependensi Node.js.
+Satu perintah menyiapkan VPS dari nol. Mendukung **Debian 11, 12, 13** dan **Ubuntu 20, 22, 24**.
 
-Jalankan perintah berikut:
 ```bash
-chmod +x install.sh
-./install.sh
+sudo bash install.sh
+```
+
+Yang dikerjakan skrip secara otomatis:
+
+| Tahap | Rincian |
+| --- | --- |
+| 🔍 Periksa sistem | Deteksi OS, RAM, disk & arsitektur; berhenti lebih awal bila tidak didukung |
+| 📦 Paket sistem | `curl`, `git`, `tar`, plus seluruh pustaka Chromium headless (nama paket ALSA menyesuaikan rilis) |
+| 🧠 Swap 4 GB | Dibuat & dipasang permanen di `/etc/fstab` dengan `swappiness=10`, mencegah bot dimatikan OOM killer saat Chrome berjalan |
+| 🟢 Node.js 20 LTS | Dipasang bila belum ada atau versinya di bawah 18 |
+| 📂 Folder & `.env` | Membuat `data`, `cookies`, `screenshots`, `sessions`, `logs`, `backups`; menyalin `.env` dari contoh dengan `JWT_SECRET` acak |
+| ⬇️ Dependensi | `npm ci` + Chrome untuk Puppeteer, dijalankan sebagai pemilik proyek (bukan root) |
+| 🔄 PM2 | PM2 + `pm2-logrotate` (maks 10 MB, simpan 7 hari, dikompres) + auto-start saat VPS reboot |
+| ♻️ Pemulihan data | Opsional, lewat `--restore` |
+| ✅ Verifikasi | Memeriksa Node, npm, PM2, `.env`, sintaks `index.js` & pemuatan modul; menampilkan ringkasan peringatan |
+
+Opsi yang tersedia:
+```bash
+sudo bash install.sh                 # pemasangan normal (swap 4 GB)
+sudo bash install.sh --swap 2        # ukuran swap khusus (GB)
+sudo bash install.sh --no-swap       # lewati pembuatan swap
+sudo bash install.sh --restore backup_autopetrip_20261015_220000.tar.gz
+sudo bash install.sh --help
 ```
 
 *(Atau jika Anda ingin melakukan instalasi secara manual, silakan ikuti langkah di bawah ini).*
@@ -236,6 +259,9 @@ Perintah manual tetap tersedia bila diperlukan:
 | `/absenkan [Nama] gratis` | Absen tanpa memotong saldo driver |
 | `/absenkansemua` | Absen semua driver tanpa potong saldo |
 | `/linkdriveruser [email] [Nama Driver]` | Tautkan akun user ke driver |
+| `/backup` | Cadangkan seluruh data & kirim berkasnya ke WhatsApp |
+| `/listbackup` | Daftar arsip cadangan yang tersimpan di VPS |
+| `/restore` | Pulihkan data (lampirkan berkas cadangan) |
 
 > Catatan tombol: WhatsApp membatasi tombol interaktif (maks. 3 per pesan, dan dukungannya bergantung versi WhatsApp). Karena itu panel memakai **navigasi angka** sebagai mekanisme utama yang selalu jalan, dengan tombol asli dipakai pada layar konfirmasi. Bila tombol tidak muncul di perangkat Anda, sistem otomatis menampilkan versi teks bernomor — fungsinya identik.
 
@@ -273,6 +299,51 @@ Driver daftar akun (email+password)  →  Top-up saldo (QRIS AutoGoPay)
 ```
 
 > **Catatan**: Cookie Google Form tetap digunakan untuk otentikasi pengisian form sebagai driver. Sistem akun (email+password) adalah lapisan baru untuk mengelola *akses bot* dan *saldo*, bukan menggantikan cookie Google.
+
+---
+
+## 💾 Cadangan Data & Pindah VPS
+
+Ganti VPS tidak lagi berarti mendaftar ulang user dan mengisi ulang saldo satu per satu. Seluruh data penting dibungkus jadi satu berkas `.tar.gz` yang dikirim lewat WhatsApp.
+
+**Isi arsip:**
+
+| Bagian | Keterangan |
+| --- | --- |
+| `data/*.json` | Akun user, saldo & mutasi, driver, jadwal libur |
+| `cookies/` | Token sesi Google tiap driver |
+| `screenshots/` | Foto reaction time milik driver |
+
+> Sesi WhatsApp (`.wwebjs_auth`) **sengaja tidak ikut**: ukurannya besar dan dua VPS yang memakai sesi sama akan saling memutus koneksi. Setelah pindah, cukup pindai ulang QR satu kali.
+
+**Kapan cadangan dibuat:**
+* **Harian** — otomatis dikirim ke WhatsApp admin (default pukul 22:00, atur lewat `BACKUP_SCHEDULE`).
+* **Setiap saldo masuk** — top-up, bonus, dan penyesuaian saldo memicu cadangan lokal. Transaksi beruntun digabung jadi satu arsip agar tidak memberatkan disk.
+* **Manual** — kapan saja lewat `/backup`.
+* **Sebelum restore** — kondisi lama selalu diamankan dulu, jadi arsip yang salah unggah tidak membuat data hilang.
+
+Arsip tersimpan di `backups/` (maksimal 10 arsip terbaru, sisanya dibuang otomatis).
+
+**Langkah pindah VPS:**
+
+```bash
+# 1. Di VPS lama — lewat WhatsApp
+/backup                       # simpan berkas yang dikirim bot
+
+# 2. Di VPS baru
+git clone https://github.com/ajiputra001/auto-petrip-bot.git
+cd auto-petrip-bot
+sudo bash install.sh --restore /path/backup_autopetrip_20261015_220000.tar.gz
+
+# 3. Jalankan & pindai ulang QR
+pm2 start ecosystem.config.js --env production
+pm2 logs auto-petrip-bot
+pm2 save
+```
+
+Alternatifnya, pulihkan langsung lewat WhatsApp: ketik `/restore` sambil melampirkan berkas cadangan, bot menampilkan isinya (jumlah user, driver, total saldo), lalu balas `/restore ya` untuk mengonfirmasi. Jangan lupa `pm2 restart auto-petrip-bot` setelahnya.
+
+Matikan cadangan otomatis dengan `BACKUP_ENABLED=false` di `.env`.
 
 ---
 
