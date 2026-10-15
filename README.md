@@ -209,7 +209,7 @@ npm run dev
 | `/status` | Status sistem & diagnostik |
 | `/tambahdriver [Nama]#[ID]#[Usia]#[Reaksi]` | Tambah driver |
 | `/editdriver [Nama]#[Kolom]#[Nilai]` | Edit data driver |
-| `/hapusdriver [Nama]` | Hapus driver |
+| `/hapusdriver [Nama]` | Hapus driver (khusus admin, minta konfirmasi, cookie & foto ikut dibersihkan) |
 | `/listdriver` | Daftar driver & kesiapan data |
 
 ### Media & Jadwal
@@ -228,6 +228,20 @@ npm run dev
 | `/absenmanual` | Absen semua driver |
 
 ### 🛡️ Admin Override (khusus admin)
+
+**Cara masuk sebagai admin:**
+
+Hak admin menempel pada *akun*, bukan pada nomor WhatsApp. Jadi nomor Anda harus login dulu ke akun yang ber-role `admin`:
+
+```
+/login admin@gmail.com [password]
+```
+
+Akun admin dibuat otomatis saat bot pertama kali hidup, memakai `ADMIN_EMAIL` dan `ADMIN_PASSWORD` dari `.env` (default: `admin@autopetrip.id` / `admin12345`). Lupa password? Hentikan bot, lalu set `ADMIN_PASSWORD` baru di `.env` — **tapi** akun admin yang sudah ada tidak akan ikut berubah, karena bot hanya membuatnya bila belum ada admin sama sekali. Reset lewat admin lain dengan `/adminreset`.
+
+Cek apakah login sudah berhasil dengan `/saldo`. Kalau muncul "BELUM LOGIN", berarti sesi WhatsApp Anda belum tertaut ke akun mana pun.
+
+> ⚠️ Satu sesi login berlaku per nomor WhatsApp. Kalau Anda ganti nomor atau bot dipindah ke VPS baru tanpa membawa `data/database_session.json`, Anda perlu `/login` ulang.
 
 > 🎛️ **Cukup ketik `/admin` satu kali.** Setelah itu semua aksi dilakukan dengan membalas angka atau menekan tombol — tidak perlu menghafal satu pun perintah. Daftar user & driver ditampilkan bernomor, tinggal pilih.
 
@@ -252,7 +266,10 @@ Perintah manual tetap tersedia bila diperlukan:
 | `/aktifkan [email]` / `/nonaktifkan [email]` | Kelola status akun |
 | `/setadmin [email]` | Jadikan user sebagai admin |
 | `/adminreset [email] [pass]` | Reset password user |
-| `/adjust [email] [nominal]` | Tambah/potong saldo user |
+| `/adjust [email] [nominal]` | Tambah/potong saldo **satu** user |
+| `/adjustsemua [nominal]` | Tambah/potong saldo **banyak user sekaligus** |
+| `/adjustsemua [nominal] 1,3` · `2-5` | Pilih penerima berdasarkan nomor daftar |
+| `/hapusakun [email]` | Hapus akun user permanen (saldo & sesi ikut dibersihkan) |
 | `/orderlist` · `/adminstat` | Order top-up & statistik sistem |
 | `/setform [link]` · `/getform` · `/resetform` | Kelola link Google Form |
 | `/absenkan [Nama\|email]` | **Absen manual atas nama driver mana pun** |
