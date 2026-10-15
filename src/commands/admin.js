@@ -13,21 +13,32 @@ const { getUserIdByWa, getSenderWa } = require('./akun');
 
 /**
  * Cek apakah pengirim (msg) adalah admin.
- * Menerima msg object, otomatis ambil nomor HP asli pengirim.
+ *
+ * Selalu oper msg object, jangan msg.from: di dalam grup msg.from berisi ID
+ * grup (@g.us), bukan nomor pengirim, sehingga sesi login admin tidak
+ * ditemukan dan admin asli ikut ditolak. getSenderWa() yang menangani ini.
  */
 function isAdmin(msgOrWa) {
-    const noWa = typeof msgOrWa === 'string' ? msgOrWa : getSenderWa(msgOrWa);
+    let noWa;
+    if (typeof msgOrWa === 'string') {
+        // ID grup bukan identitas orang — tolak daripada memeriksa hal yang salah.
+        if (msgOrWa.endsWith('@g.us')) return false;
+        noWa = msgOrWa;
+    } else {
+        noWa = getSenderWa(msgOrWa);
+    }
+
     const userId = getUserIdByWa(noWa);
     if (!userId) return false;
     const user = auth.findUserById(userId);
-    return !!user && user.role === 'admin';
+    return !!user && user.role === 'admin' && user.isActive !== false;
 }
 
 /**
  * /admin — menu admin (teks)
  */
 async function handleAdminMenu(msg) {
-    if (!isAdmin(msg.from)) {
+    if (!isAdmin(msg)) {
         return msg.reply(`❌ *AKSES DITOLAK*\nPerintah ini khusus admin.`);
     }
 
@@ -49,6 +60,9 @@ async function handleAdminMenu(msg) {
     teks += `🚚 \`/absenkan [Nama|email]\` — Absen manual atas nama driver\n`;
     teks += `🆓 \`/absenkan [Nama] gratis\` — Absen tanpa potong saldo\n`;
     teks += `👥 \`/absenkansemua\` — Absen semua driver (tanpa potong saldo)\n`;
+    teks += `💰 \`/adjustsemua [nominal]\` — Tambah saldo banyak user sekaligus\n`;
+    teks += `🗑️ \`/hapusakun [email]\` — Hapus akun user permanen\n`;
+    teks += `🚚 \`/hapusdriver [Nama]\` — Hapus driver + cookie & foto\n`;
     teks += `💾 \`/backup\` — Cadangkan data & kirim ke WA\n`;
     teks += `📦 \`/listbackup\` — Daftar cadangan di VPS\n`;
     teks += `♻️ \`/restore\` — Pulihkan data (lampirkan berkas cadangan)\n`;
@@ -154,7 +168,7 @@ async function handleAbsenkanSemua(msg, pesan, waClient) {
  * /listuser — daftar user
  */
 async function handleListUser(msg) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
 
     const users = auth.listUsers();
     if (!users.length) return msg.reply(`📋 Belum ada user.`);
@@ -176,7 +190,7 @@ async function handleListUser(msg) {
  * /aktifkan [email] — aktifkan user
  */
 async function handleAktifkan(msg, pesan) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const email = pesan.split(' ').slice(1).join(' ').trim();
     if (!email) return msg.reply(`Gunakan: \`/aktifkan [email]\``);
 
@@ -191,7 +205,7 @@ async function handleAktifkan(msg, pesan) {
  * /nonaktifkan [email] — nonaktifkan user
  */
 async function handleNonaktifkan(msg, pesan) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const email = pesan.split(' ').slice(1).join(' ').trim();
     if (!email) return msg.reply(`Gunakan: \`/nonaktifkan [email]\``);
 
@@ -210,7 +224,7 @@ async function handleNonaktifkan(msg, pesan) {
  * /setadmin [email] — jadikan admin
  */
 async function handleSetAdmin(msg, pesan) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const email = pesan.split(' ').slice(1).join(' ').trim();
     if (!email) return msg.reply(`Gunakan: \`/setadmin [email]\``);
 
@@ -225,7 +239,7 @@ async function handleSetAdmin(msg, pesan) {
  * /adminreset [email] [password] — reset password user
  */
 async function handleAdminReset(msg, pesan) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const args = pesan.split(' ').filter(Boolean);
     if (args.length < 3) return msg.reply(`Gunakan: \`/adminreset [email] [passwordBaru]\``);
 
@@ -243,7 +257,7 @@ async function handleAdminReset(msg, pesan) {
  * /adjust [email] [nominal] — tambah/potong saldo
  */
 async function handleAdjust(msg, pesan) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const args = pesan.split(' ').filter(Boolean);
     if (args.length < 3) return msg.reply(`Gunakan: \`/adjust [email] [nominal]\`\nContoh: \`/adjust budi@gmail.com 50000\` atau \`/adjust budi@gmail.com -10000\``);
 
@@ -265,7 +279,7 @@ async function handleAdjust(msg, pesan) {
  * /orderlist — lihat order top-up
  */
 async function handleOrderList(msg) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
 
     const orders = payment.listOrders(15);
     if (!orders.length) return msg.reply(`🧾 Belum ada order.`);
@@ -286,7 +300,7 @@ async function handleOrderList(msg) {
  * /adminstat — statistik sistem
  */
 async function handleAdminStat(msg) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
 
     const users = auth.listUsers();
     const w = wallet.summary();
@@ -309,7 +323,7 @@ async function handleAdminStat(msg) {
  * /setform [link] — ganti link Google Form
  */
 async function handleSetForm(msg, pesan) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const url = pesan.split(' ').slice(1).join(' ').trim();
     if (!url) {
         return msg.reply(
@@ -331,7 +345,7 @@ async function handleSetForm(msg, pesan) {
  * /getform — lihat link form aktif
  */
 async function handleGetForm(msg) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     return msg.reply(
         `🔗 *LINK FORM AKTIF*\n━━━━━━━━━━━━━━━━━━━━━━\n${settings.getFormUrl()}`
     );
@@ -341,7 +355,7 @@ async function handleGetForm(msg) {
  * /resetform — kembalikan ke link default (.env)
  */
 async function handleResetForm(msg) {
-    if (!isAdmin(msg.from)) return msg.reply(`❌ *AKSES DITOLAK*`);
+    if (!isAdmin(msg)) return msg.reply(`❌ *AKSES DITOLAK*`);
     const r = settings.resetFormUrl();
     return msg.reply(
         `↩️ *LINK DIKEMBALIKAN KE DEFAULT*\n━━━━━━━━━━━━━━━━━━━━━━\n${r.url}`
