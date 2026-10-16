@@ -79,6 +79,35 @@ async function _kirimPesanAman(waClient, tujuan, pesan, label = 'pesan') {
  * @param {import('puppeteer').Page} page
  * @returns {Promise<string|null>}
  */
+/**
+ * Pastikan Google Form BENAR-BENAR terkirim.
+ *
+ * `location.href` TIDAK bisa dijadikan patokan: pada formulir multi-halaman,
+ * setiap klik "Berikutnya" ikut mengarahkan URL ke `/formResponse`. Memakai
+ * URL saja membuat bot melaporkan "sukses" padahal masih berhenti di tengah
+ * formulir — persis gejala laporan berhasil tapi form aslinya kosong.
+ *
+ * Halaman sukses yang sah punya dua ciri sekaligus: ada kalimat konfirmasi,
+ * dan sudah tidak ada pertanyaan tersisa.
+ *
+ * @param {import('puppeteer').Page} page
+ * @param {number} timeout
+ */
+async function _verifikasiTerkirim(page, timeout = 30000) {
+    await page.waitForFunction(() => {
+        const teks = document.body.innerText || '';
+
+        const adaKonfirmasi = /jawaban anda telah direkam|respons anda telah direkam|your response has been recorded/i.test(teks) ||
+            /kirim respons lain|submit another response|edit respons anda|edit your response/i.test(teks);
+
+        const masihAdaPertanyaan = !!document.querySelector(
+            'div[role="listitem"], input[type="text"], div[role="radio"], div[role="checkbox"]'
+        );
+
+        return adaKonfirmasi && !masihAdaPertanyaan;
+    }, { timeout });
+}
+
 async function _cariErrorWajib(page) {
     try {
         return await page.evaluate(() => {
@@ -454,20 +483,36 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
             await progress.update(4, 'Mengonfirmasi opsi libur & Mengirimkan form...');
             await delay(3000);
             await tutupDialogGangguan(page);
-            await klikTombolTeks(page, 'Kirim', 'Submit');
 
+            // Pastikan form benar-benar pindah ke halaman penutup. Bila dialog
+            // draf menelan klik "Berikutnya", halaman tidak bergerak dan tombol
+            // "Kirim" tidak akan pernah ada — lebih baik gagal terang-terangan
+            // daripada melaporkan sukses palsu.
             try {
                 await page.waitForFunction(
-                    () => location.href.includes('formResponse') ||
-                        /jawaban anda telah direkam|your response has been recorded/i.test(document.body.innerText),
-                    { timeout: 30000 }
+                    () => [...document.querySelectorAll('div[role="button"]')]
+                        .some(b => /^(kirim|submit)$/i.test((b.innerText || '').trim())),
+                    { timeout: 20000 }
                 );
             } catch (e) {
                 const pesanWajib = await _cariErrorWajib(page);
                 throw new Error(
                     pesanWajib
+                        ? `Form menahan pengisian libur: ${pesanWajib}`
+                        : 'Halaman kirim untuk mode libur tidak terbuka. Ada data wajib di halaman sebelumnya yang belum terisi.'
+                );
+            }
+
+            await klikTombolTeks(page, 'Kirim', 'Submit');
+
+            try {
+                await _verifikasiTerkirim(page);
+            } catch (e) {
+                const pesanWajib = await _cariErrorWajib(page);
+                throw new Error(
+                    pesanWajib
                         ? `Form menolak pengiriman libur: ${pesanWajib}`
-                        : 'Gagal memverifikasi pengiriman libur: Halaman Google Form tidak beralih ke halaman sukses.'
+                        : 'Gagal memverifikasi pengiriman libur: Halaman Google Form tidak sampai ke halaman konfirmasi.'
                 );
             }
 
@@ -547,11 +592,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         // Tunggu halaman sukses alih-alih menebak dengan delay tetap.
         try {
-            await page.waitForFunction(
-                () => location.href.includes('formResponse') ||
-                    /jawaban anda telah direkam|your response has been recorded/i.test(document.body.innerText),
-                { timeout: 30000 }
-            );
+            await _verifikasiTerkirim(page);
         } catch (e) {
             const pesanWajib = await _cariErrorWajib(page);
             throw new Error(
