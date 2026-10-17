@@ -83,32 +83,52 @@ async function _kirimPesanAman(waClient, tujuan, pesan, label = 'pesan') {
  * @returns {Promise<string|null>}
  */
 /**
- * Pastikan Google Form BENAR-BENAR terkirim.
+ * Ciri halaman penutup Google Form, dijalankan di dalam browser.
+ *
+ * Ditulis sebagai sumber fungsi agar pengecekan yang sama persis dipakai oleh
+ * penantian (`waitForFunction`) maupun pemeriksaan sekali jalan — bila polanya
+ * ditulis dua kali, keduanya bisa diam-diam menjadi berbeda.
  *
  * `location.href` TIDAK bisa dijadikan patokan: pada formulir multi-halaman,
- * setiap klik "Berikutnya" ikut mengarahkan URL ke `/formResponse`. Memakai
- * URL saja membuat bot melaporkan "sukses" padahal masih berhenti di tengah
- * formulir — persis gejala laporan berhasil tapi form aslinya kosong.
+ * setiap klik "Berikutnya" ikut mengarahkan URL ke `/formResponse`.
  *
- * Halaman sukses yang sah punya dua ciri sekaligus: ada kalimat konfirmasi,
- * dan sudah tidak ada pertanyaan tersisa.
- *
+ * Keberadaan `div[role="listitem"]` juga TIDAK bisa dipakai sebagai penanda
+ * masih ada pertanyaan: Google Form tetap merender elemen itu di halaman
+ * penutup, sehingga syarat tersebut tidak pernah terpenuhi walau form sudah
+ * terkirim. Penanda yang benar adalah hilangnya tombol navigasi formulir.
+ */
+const POLA_KONFIRMASI_SUMBER = `() => {
+    const teks = document.body.innerText || '';
+
+    const adaKonfirmasi =
+        /(jawaban|respons|tanggapan) anda (telah|sudah) direkam|your response has been recorded/i.test(teks) ||
+        /kirim (jawaban|respons|tanggapan) lain|submit another response/i.test(teks) ||
+        /edit (jawaban|respons|tanggapan)( anda)?|edit your response/i.test(teks) ||
+        /lihat skor|view score/i.test(teks);
+
+    // "Kirim jawaban lain" adalah tautan, bukan tombol, jadi tidak tertangkap.
+    const adaTombolFormulir = [...document.querySelectorAll('div[role="button"]')]
+        .some((b) => /^(kirim|submit|berikutnya|next)$/i.test((b.innerText || '').trim()));
+
+    return adaKonfirmasi && !adaTombolFormulir;
+}`;
+
+/**
+ * Tunggu sampai Google Form benar-benar sampai di halaman penutup.
  * @param {import('puppeteer').Page} page
  * @param {number} timeout
  */
 async function _verifikasiTerkirim(page, timeout = 30000) {
-    await page.waitForFunction(() => {
-        const teks = document.body.innerText || '';
+    await page.waitForFunction(POLA_KONFIRMASI_SUMBER, { timeout });
+}
 
-        const adaKonfirmasi = /jawaban anda telah direkam|respons anda telah direkam|your response has been recorded/i.test(teks) ||
-            /kirim respons lain|submit another response|edit respons anda|edit your response/i.test(teks);
-
-        const masihAdaPertanyaan = !!document.querySelector(
-            'div[role="listitem"], input[type="text"], div[role="radio"], div[role="checkbox"]'
-        );
-
-        return adaKonfirmasi && !masihAdaPertanyaan;
-    }, { timeout });
+/**
+ * Periksa sekali (tanpa menunggu) apakah halaman konfirmasi sedang terbuka.
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<boolean>}
+ */
+async function _halamanKonfirmasiTerbuka(page) {
+    return page.evaluate(POLA_KONFIRMASI_SUMBER).catch(() => false);
 }
 
 async function _cariErrorWajib(page) {
@@ -219,6 +239,13 @@ async function _kirimDanVerifikasi(page, driver, konteks = 'kerja') {
             logger.warn(driver.nama, `Pengiriman belum tercatat (percobaan ${percobaan}/${MAX_PERCOBAAN_KIRIM}). Mencoba menekan "Kirim" lagi...`);
             await delay(3000);
         }
+    }
+
+    // Jaring pengaman terakhir: lebih baik memeriksa ulang daripada
+    // melaporkan gagal padahal halaman konfirmasi jelas-jelas terbuka.
+    if (await _halamanKonfirmasiTerbuka(page)) {
+        logger.warn(driver.nama, 'Verifikasi awal meleset, tetapi halaman konfirmasi terdeteksi — form dihitung terkirim.');
+        return;
     }
 
     const alasan = await _diagnosaGagalKirim(page);
