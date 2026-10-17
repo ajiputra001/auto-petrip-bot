@@ -35,6 +35,9 @@ const DRIVER_TIMEOUT_MS = 8 * 60 * 1000;
 const KIRIM_TIMEOUT_MS = 30000;
 const KIRIM_MAX_PERCOBAAN = 3;
 
+// Klik "Kirim" di Google Form bisa tertelan dialog draf tanpa jejak
+const MAX_PERCOBAAN_KIRIM = 3;
+
 // ── Kunci siklus absen ──
 // Google Form kini menyimpan draf jawaban per akun Google. Bila dua siklus
 // (misal /absenmanual + catch-up cron) berjalan bersamaan, kedua sesi saling
@@ -119,6 +122,107 @@ async function _cariErrorWajib(page) {
     } catch (e) {
         return null;
     }
+}
+
+/**
+ * Periksa keadaan halaman saat pengiriman gagal, lalu susun alasan yang
+ * benar-benar menjelaskan masalahnya.
+ *
+ * Pesan "cek cookie atau data wajib" terlalu umum untuk ditindaklanjuti.
+ * Dengan membaca kondisi nyata halaman, bot bisa menyebut sebab spesifik:
+ * sudah pernah mengisi hari ini, kolom wajib kosong, tombol kirim tak
+ * tertekan, sesi logout, dan seterusnya.
+ *
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<string>} Alasan siap tampil
+ */
+async function _diagnosaGagalKirim(page) {
+    let info;
+    try {
+        info = await page.evaluate(() => {
+            const teks = document.body.innerText || '';
+            const tombol = [...document.querySelectorAll('div[role="button"]')]
+                .map((b) => (b.innerText || '').trim().toLowerCase());
+
+            return {
+                url: location.href,
+                alert: [...document.querySelectorAll('[role="alert"]')]
+                    .map((e) => (e.innerText || '').trim())
+                    .filter(Boolean)
+                    .slice(0, 3)
+                    .join(' | '),
+                adaTombolKirim: tombol.some((t) => /^(kirim|submit)$/.test(t)),
+                adaTombolBerikutnya: tombol.some((t) => /^(berikutnya|next)$/.test(t)),
+                sudahMengisi: /sudah (pernah )?(mengisi|merespons|mengirim)|already responded|hanya dapat mengisi|you can only fill|satu tanggapan|one response/i.test(teks),
+                perluLogin: /sign in|masuk ke akun|login required|anda tidak memiliki akses|you need permission/i.test(teks),
+                formTutup: /tidak lagi menerima|no longer accepting|formulir ditutup|form closed/i.test(teks),
+                cuplikan: teks.replace(/\s+/g, ' ').trim().slice(0, 160),
+            };
+        });
+    } catch (e) {
+        return 'Halaman form tidak bisa dibaca (browser kemungkinan tertutup di tengah proses).';
+    }
+
+    if (info.sudahMengisi) {
+        return 'Akun Google ini sudah mengisi formulir hari ini. Google menolak pengisian kedua.';
+    }
+    if (info.formTutup) {
+        return 'Google Form sedang ditutup dan tidak menerima tanggapan baru.';
+    }
+    if (info.perluLogin || /accounts\.google\.com|ServiceLogin/.test(info.url)) {
+        return 'Sesi Google terputus di tengah pengisian. Cookie perlu diperbarui.';
+    }
+    if (info.alert) {
+        return `Form menolak pengiriman: ${info.alert}`;
+    }
+    if (info.adaTombolKirim) {
+        return 'Tombol "Kirim" sudah ditekan tapi halaman tidak berpindah. Google Form kemungkinan menahan proses (koneksi lambat atau draf bentrok).';
+    }
+    if (info.adaTombolBerikutnya) {
+        return 'Proses masih tertahan di tengah formulir — ada halaman yang belum terlewati.';
+    }
+
+    return `Halaman akhir tidak muncul. Kondisi terakhir: "${info.cuplikan || 'halaman kosong'}"`;
+}
+
+/**
+ * Tekan "Kirim" lalu pastikan formulir benar-benar terkirim.
+ *
+ * Klik tunggal tidak selalu cukup: dialog draf Google Form bisa menelan klik
+ * tanpa jejak, dan halaman tetap diam. Selama tombol "Kirim" masih terlihat,
+ * artinya pengiriman belum terjadi dan layak dicoba lagi.
+ *
+ * @param {import('puppeteer').Page} page
+ * @param {Object} driver
+ * @param {string} konteks - 'libur' | 'kerja', untuk pesan galat
+ */
+async function _kirimDanVerifikasi(page, driver, konteks = 'kerja') {
+    for (let percobaan = 1; percobaan <= MAX_PERCOBAAN_KIRIM; percobaan++) {
+        await tutupDialogGangguan(page);
+        await klikTombolTeks(page, 'Kirim', 'Submit');
+
+        try {
+            await _verifikasiTerkirim(page);
+            return;
+        } catch (e) {
+            const masihBisaDikirim = await page
+                .evaluate(() =>
+                    [...document.querySelectorAll('div[role="button"]')]
+                        .some((b) => /^(kirim|submit)$/i.test((b.innerText || '').trim()))
+                )
+                .catch(() => false);
+
+            // Tombol kirim sudah hilang = pengiriman sedang/sudah diproses,
+            // mengklik ulang hanya akan menggandakan tanggapan.
+            if (!masihBisaDikirim || percobaan === MAX_PERCOBAAN_KIRIM) break;
+
+            logger.warn(driver.nama, `Pengiriman belum tercatat (percobaan ${percobaan}/${MAX_PERCOBAAN_KIRIM}). Mencoba menekan "Kirim" lagi...`);
+            await delay(3000);
+        }
+    }
+
+    const alasan = await _diagnosaGagalKirim(page);
+    throw new Error(konteks === 'libur' ? `Pengiriman form libur gagal. ${alasan}` : `Pengiriman form gagal. ${alasan}`);
 }
 
 /** Jeda agar JavaScript Google Drive di dalam picker selesai memasang listener. */
@@ -503,18 +607,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
                 );
             }
 
-            await klikTombolTeks(page, 'Kirim', 'Submit');
-
-            try {
-                await _verifikasiTerkirim(page);
-            } catch (e) {
-                const pesanWajib = await _cariErrorWajib(page);
-                throw new Error(
-                    pesanWajib
-                        ? `Form menolak pengiriman libur: ${pesanWajib}`
-                        : 'Gagal memverifikasi pengiriman libur: Halaman Google Form tidak sampai ke halaman konfirmasi.'
-                );
-            }
+            await _kirimDanVerifikasi(page, driver, 'libur');
 
             await progress.update(4, '🚀 Form Sukses Terkirim!');
             await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, options.chatId);
@@ -587,20 +680,8 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         await _tandaTanganPakta(page, driver);
 
-        // Submit!
-        await klikTombolTeks(page, 'Kirim', 'Submit');
-
-        // Tunggu halaman sukses alih-alih menebak dengan delay tetap.
-        try {
-            await _verifikasiTerkirim(page);
-        } catch (e) {
-            const pesanWajib = await _cariErrorWajib(page);
-            throw new Error(
-                pesanWajib
-                    ? `Form menolak pengiriman: ${pesanWajib}`
-                    : 'Gagal memverifikasi pengiriman: Halaman Google Form tidak beralih ke halaman sukses. Cek cookie atau data wajib yang belum terisi.'
-            );
-        }
+        // Submit! Klik + verifikasi, dengan percobaan ulang bila klik tertelan.
+        await _kirimDanVerifikasi(page, driver, 'kerja');
 
         await progress.update(4, '🚀 Form Sukses Terkirim!');
         await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, options.chatId);

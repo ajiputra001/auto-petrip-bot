@@ -221,6 +221,11 @@ function _namaPerluUlang(hasil, fallbackNama = null) {
         'media file ss reaksi kosong',
         'file cookie tidak ditemukan',
         'tidak terdaftar',
+        // Mengulang hanya memotong saldo lagi tanpa pernah bisa berhasil:
+        // Google menolak tanggapan kedua & form yang ditutup.
+        'sudah mengisi formulir hari ini',
+        'sedang ditutup',
+        'sesi google terputus',
     ];
 
     return (hasil.rekapLaporan || [])
@@ -265,9 +270,7 @@ function _nomorAdmin() {
  */
 async function kirimBackupHarian(client) {
     try {
-        const { MessageMedia } = require('whatsapp-web.js');
         const backup = require('./services/backup');
-        const fs = require('fs');
 
         logger.system('⏰ Cron: membuat cadangan data harian...');
         const hasil = await backup.buatBackup({ alasan: 'cadangan harian' });
@@ -306,21 +309,20 @@ async function kirimBackupHarian(client) {
             return;
         }
 
-        const media = new MessageMedia(
-            'application/gzip',
-            fs.readFileSync(hasil.berkas).toString('base64'),
-            hasil.nama
-        );
+        const { kirimArsip } = require('./commands/backup');
 
         for (const wa of tujuan) {
-            try {
-                await client.sendMessage(wa, media, {
-                    sendMediaAsDocument: true,
-                    caption: keterangan,
-                });
+            const ok = await kirimArsip(client, wa, hasil, { caption: keterangan });
+            if (ok) {
                 logger.success('BACKUP', `Cadangan harian terkirim ke ${wa}.`);
-            } catch (e) {
-                logger.error('BACKUP', `Gagal mengirim cadangan ke ${wa}: ${e.message}`);
+            } else {
+                // Arsip tetap ada di server; beri tahu admin agar bisa diambil manual.
+                try {
+                    await client.sendMessage(wa,
+                        `${keterangan}\n\n⚠️ Berkas gagal dikirim lewat WhatsApp.\nAmbil manual: \`${hasil.berkas}\``);
+                } catch (e) {
+                    logger.error('BACKUP', `Pemberitahuan cadangan ke ${wa} juga gagal: ${e.message}`);
+                }
             }
         }
     } catch (e) {
