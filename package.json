@@ -4,6 +4,8 @@
   "description": "🚀 AJIPUTRA BOT — Sovereign Telemetry WhatsApp Automation Engine + Payment Gateway",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/patch-wwebjs.js",
+    "patch:wwebjs": "node scripts/patch-wwebjs.js",
     "start": "node index.js",
     "dev": "node --watch-path=src --watch-path=index.js index.js",
     "check": "node --check index.js",

@@ -294,6 +294,14 @@ else
 fi
 sukses "Dependensi Node.js terpasang."
 
+# whatsapp-web.js 1.34.7 tidak bisa mengirim berkas sama sekali di WhatsApp Web
+# versi 2026 (galat "Data passed to getter must include an id property").
+# postinstall sudah menanganinya, tapi `npm ci` bisa melewati skrip bila
+# dijalankan dengan --ignore-scripts, jadi pastikan sekali lagi di sini.
+sebagai_user node scripts/patch-wwebjs.js >/dev/null 2>&1 \
+    && sukses "Tambalan pengiriman berkas WhatsApp diterapkan." \
+    || ingat "Tambalan whatsapp-web.js gagal. Jalankan manual: npm run patch:wwebjs"
+
 info "Memasang Chrome untuk Puppeteer..."
 if sebagai_user npx --yes puppeteer browsers install chrome >/dev/null 2>&1; then
     sukses "Chrome untuk Puppeteer siap."

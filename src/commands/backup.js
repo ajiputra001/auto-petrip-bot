@@ -16,6 +16,10 @@ const { kartu, kode, tebal, miring, cabang } = require('../utils/tampilan');
 const menungguKonfirmasi = new Map();
 const KONFIRMASI_BERLAKU_MS = 5 * 60 * 1000;
 
+// Pengiriman arsip ke WhatsApp bisa gagal sesaat saat sesi browser sibuk
+const MAX_PERCOBAAN_KIRIM = 3;
+const JEDA_KIRIM_ULANG_MS = 5000;
+
 function _isAdmin(msg) {
     // Dimuat saat dipanggil untuk menghindari lingkar impor dengan admin.js
     return require('./admin').isAdmin(msg);
@@ -126,21 +130,82 @@ async function handleBackup(msg, pesan, waClient) {
             ],
         }));
 
-        const media = new MessageMedia(
-            'application/gzip',
-            fs.readFileSync(hasil.berkas).toString('base64'),
-            hasil.nama
-        );
-        await waClient.sendMessage(msg.safeChatId || msg.from, media, {
-            sendMediaAsDocument: true,
+        const terkirim = await kirimArsip(waClient, msg.safeChatId || msg.from, hasil, {
             caption: `💾 Cadangan Auto-Petrip — ${hasil.nama}`,
         });
 
-        logger.success('BACKUP', `Arsip ${hasil.nama} terkirim ke ${msg.from}`);
+        if (terkirim) {
+            logger.success('BACKUP', `Arsip ${hasil.nama} terkirim ke ${msg.from}`);
+        } else {
+            // Arsipnya sendiri sudah jadi & aman di VPS — yang gagal hanya
+            // pengirimannya, jadi jangan sampai terbaca seolah backup batal.
+            await msg.reply(kartu({
+                judul: `⚠️ *ARSIP DIBUAT, GAGAL DIKIRIM*`,
+                isi: [
+                    `📦 ${kode(hasil.nama)}`,
+                    `📏 Ukuran: ${tebal(ukuran)}`,
+                    ``,
+                    `Cadangan ${tebal('aman tersimpan')} di server, tetapi WhatsApp menolak mengirim berkasnya.`,
+                ],
+                kaki: [
+                    `💡 Coba lagi dengan ${kode('/backup')}, atau ambil manual:`,
+                    kode(hasil.berkas),
+                ],
+            }));
+        }
     } catch (e) {
         logger.error('BACKUP', `Gagal membuat cadangan: ${e.message}`);
         await msg.reply(`❌ *GAGAL MEMBUAT CADANGAN*\n_${e.message}_`);
     }
+}
+
+/**
+ * Kirim arsip cadangan sebagai dokumen WhatsApp.
+ *
+ * Pengiriman diulang beberapa kali karena jaringan/unggahan bisa gagal sesaat.
+ * Namun galat "Data passed to getter must include an id property" BUKAN galat
+ * sementara: itu bug whatsapp-web.js yang membuat semua pengiriman berkas
+ * gagal, dan sudah ditambal oleh scripts/patch-wwebjs.js. Bila galat itu masih
+ * muncul, tambalannya belum terpasang — mengulang tidak akan menolong, jadi
+ * berhenti lebih awal dan beri tahu cara memperbaikinya.
+ *
+ * @param {Object} waClient
+ * @param {string} tujuan - Chat ID tujuan
+ * @param {{ berkas: string, nama: string }} hasil
+ * @param {{ caption?: string }} opsi
+ * @returns {Promise<boolean>} true bila berkas benar-benar terkirim
+ */
+async function kirimArsip(waClient, tujuan, hasil, opsi = {}) {
+    const { delay } = require('../utils/helpers');
+
+    for (let percobaan = 1; percobaan <= MAX_PERCOBAAN_KIRIM; percobaan++) {
+        try {
+            // Dibaca ulang tiap percobaan: MessageMedia yang sudah gagal
+            // dipakai bisa menyimpan state internal yang rusak.
+            const media = MessageMedia.fromFilePath(hasil.berkas);
+            media.mimetype = 'application/gzip';
+            media.filename = hasil.nama;
+
+            await waClient.sendMessage(tujuan, media, {
+                sendMediaAsDocument: true,
+                caption: opsi.caption || `💾 Cadangan Auto-Petrip — ${hasil.nama}`,
+            });
+            return true;
+        } catch (e) {
+            if (/must include an id property/i.test(e.message)) {
+                logger.error('BACKUP',
+                    'Pengiriman berkas diblokir bug whatsapp-web.js. ' +
+                    'Jalankan "npm run patch:wwebjs" lalu mulai ulang bot.');
+                return false;
+            }
+
+            logger.warn('BACKUP', `Pengiriman arsip gagal (${percobaan}/${MAX_PERCOBAAN_KIRIM}): ${e.message}`);
+            if (percobaan < MAX_PERCOBAAN_KIRIM) await delay(JEDA_KIRIM_ULANG_MS);
+        }
+    }
+
+    logger.error('BACKUP', `Arsip ${hasil.nama} tidak terkirim setelah ${MAX_PERCOBAAN_KIRIM} percobaan. Berkas tetap aman di ${hasil.berkas}`);
+    return false;
 }
 
 /**
@@ -376,4 +441,4 @@ function _intipManifest(arsipPath) {
     })();
 }
 
-module.exports = { handleBackup, handleRestore, handleListBackup };
+module.exports = { handleBackup, handleRestore, handleListBackup, kirimArsip };
