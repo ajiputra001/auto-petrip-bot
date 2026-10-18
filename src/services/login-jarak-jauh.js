@@ -124,7 +124,23 @@ async function _cekPrasyarat() {
     if (kurang.length) {
         throw new Error(`Paket sistem belum terpasang: ${kurang.join(', ')}. Jalankan: sudo apt-get install -y ${kurang.join(' ')}`);
     }
-    if (!config.chromePath) throw new Error('Google Chrome tidak ditemukan di server.');
+    if (!_pathChrome()) {
+        throw new Error('Chrome tidak ditemukan. Jalankan: npx puppeteer browsers install chrome');
+    }
+}
+
+/**
+ * Chrome sistem (/usr/bin/google-chrome) diutamakan; bila tidak ada, pakai
+ * Chrome bawaan Puppeteer (~/.cache/puppeteer) yang dipasang install.sh.
+ * @returns {string|null}
+ */
+function _pathChrome() {
+    if (config.chromePath && fs.existsSync(config.chromePath)) return config.chromePath;
+    try {
+        const bawaan = puppeteer.executablePath();
+        if (bawaan && fs.existsSync(bawaan)) return bawaan;
+    } catch (e) { /* Chrome Puppeteer belum diunduh */ }
+    return null;
 }
 
 /** Jalankan Xvfb; nomor display bebas dipilih Xvfb sendiri (-displayfd). */
@@ -242,7 +258,7 @@ async function _nyalakanChrome(sesi, url) {
     if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox');
     args.push(`--app=${url}`); // jendela tanpa bilah alamat/tab — murni halaman Google
 
-    sesi.chrome = spawn(config.chromePath, args, { stdio: 'ignore', env: sesi.env });
+    sesi.chrome = spawn(_pathChrome(), args, { stdio: 'ignore', env: sesi.env });
     const proc = sesi.chrome;
     proc.on('exit', () => {
         if (sesi.chrome === proc && !sesi.selesai && !sesi.sedangMenyimpan) {
@@ -255,7 +271,11 @@ async function _nyalakanChrome(sesi, url) {
     for (let i = 0; i < 40; i++) {
         await delay(500);
         try {
-            const id = (await _exec(BIN.xdotool, ['search', '--onlyvisible', '--class', 'chrome'], sesi.env)).split('\n')[0];
+            // Mode --app memberi WM_CLASS berupa nama domain (bukan "chrome"),
+            // jadi cari per PID; display Xvfb ini hanya berisi Chrome sesi.
+            const id = (await _exec(BIN.xdotool, ['search', '--onlyvisible', '--pid', String(proc.pid)], sesi.env)
+                .catch(() => _exec(BIN.xdotool, ['search', '--onlyvisible', '--name', '.'], sesi.env)))
+                .split('\n')[0];
             if (id) {
                 sesi.idJendela = id;
                 await _exec(BIN.xdotool, ['windowfocus', '--sync', id], sesi.env).catch(() => {});
@@ -299,7 +319,7 @@ async function _panenCookie(sesi) {
         browser = await puppeteer.launch({
             headless: 'new',
             userDataDir: sesi.profil,
-            executablePath: config.chromePath,
+            executablePath: _pathChrome(),
             args: [...config.puppeteerArgs, '--password-store=basic'],
             timeout: 90000,
         });
