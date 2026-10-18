@@ -15,6 +15,7 @@ const {
     createPage,
     bukaHalaman,
     injectCookies,
+    simpanCookie,
     tutupDialogGangguan,
     klikTombolTeks,
     klikAriaLabel,
@@ -566,6 +567,13 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
             throw new Error('Cookie kedaluwarsa. Silakan update cookie baru.');
         }
 
+        // Form terbuka = sesi Google masih sah. Google sudah sempat merotasi
+        // token (__Secure-1PSIDTS/SIDCC) saat memuat halaman ini, jadi simpan
+        // nilai terbarunya sekarang — sebelum langkah lain berpeluang gagal.
+        // Tanpa ini berkas cookie membeku di nilai lama dan Google mencabutnya
+        // dalam hitungan hari.
+        await simpanCookie(browser, cookiePath, driver.nama);
+
         // ── Page 1: Checkbox Email ──
         await progress.update(2, '[STAGE 1/4] Sinkronisasi Checkbox Email...');
         await tutupDialogGangguan(page);
@@ -635,6 +643,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
             }
 
             await _kirimDanVerifikasi(page, driver, 'libur');
+            await simpanCookie(browser, cookiePath, driver.nama);
 
             await progress.update(4, '🚀 Form Sukses Terkirim!');
             await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, options.chatId);
@@ -709,6 +718,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         // Submit! Klik + verifikasi, dengan percobaan ulang bila klik tertelan.
         await _kirimDanVerifikasi(page, driver, 'kerja');
+        await simpanCookie(browser, cookiePath, driver.nama);
 
         await progress.update(4, '🚀 Form Sukses Terkirim!');
         await _kirimLaporanSukses(waClient, driver, isLibur, ringkasanAI, options.chatId);

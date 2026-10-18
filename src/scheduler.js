@@ -54,10 +54,19 @@ function _bacaState() {
     return bacaJSON(STATE_FILE) || {};
 }
 
+/**
+ * Simpan state scheduler.
+ *
+ * Status absen ditulis sebagai objek utuh (field lama sengaja tergantikan),
+ * tetapi blok `backup` dipertahankan karena dikelola siklus terpisah — tanpa
+ * ini, setiap penulisan state absen akan menghapus penanda cadangan harian dan
+ * catch-up akan membuat cadangan berulang kali.
+ */
 function _tulisState(state) {
     try {
         ensureDir(config.dataDir);
-        tulisJSON(STATE_FILE, state);
+        const lama = _bacaState();
+        tulisJSON(STATE_FILE, { backup: lama.backup, ...state });
     } catch (e) {
         logger.warn('SCHEDULER', `Gagal menyimpan state scheduler: ${e.message}`);
     }
@@ -239,8 +248,15 @@ function _namaPerluUlang(hasil, fallbackNama = null) {
 
 /**
  * Kumpulkan nomor WA admin yang sedang login, untuk tujuan kiriman cadangan.
+ *
+ * Bila tidak ada admin yang sedang login lewat WhatsApp, cadangan tetap harus
+ * sampai — jadi dipakai nomor WA_ADMIN dari .env sebagai cadangan terakhir.
+ * Tanpa fallback ini cadangan harian dibuat tapi tidak pernah dikirim ke mana
+ * pun, dan satu-satunya jejaknya hanya sebaris peringatan di log.
  */
 function _nomorAdmin() {
+    const cadanganEnv = config.waAdmin ? [config.waAdmin] : [];
+
     try {
         const auth = require('./auth');
         const sesi = bacaJSON(path.join(config.dataDir, 'database_session.json')) || {};
@@ -253,26 +269,34 @@ function _nomorAdmin() {
 
         // Satu admin bisa punya beberapa tautan (@c.us & @lid); @c.us yang
         // bisa dikirimi pesan, @lid hanya penanda internal WhatsApp.
-        return [...new Set(
+        const dariSesi = [...new Set(
             Object.entries(sesi)
                 .filter(([wa, userId]) => idAdmin.has(userId) && wa.endsWith('@c.us'))
                 .map(([wa]) => wa)
         )];
+
+        if (dariSesi.length) return dariSesi;
+
+        if (cadanganEnv.length) {
+            logger.warn('BACKUP', `Tidak ada admin login via WA. Memakai WA_ADMIN dari .env: ${cadanganEnv.join(', ')}.`);
+        }
+        return cadanganEnv;
     } catch (e) {
         logger.warn('BACKUP', `Gagal menentukan admin tujuan: ${e.message}`);
-        return [];
+        return cadanganEnv;
     }
 }
 
 /**
  * Buat cadangan harian lalu kirim sebagai dokumen ke admin.
  * @param {Object} client - WhatsApp client instance
+ * @param {string} alasan - 'cron' | 'catchup'
  */
-async function kirimBackupHarian(client) {
+async function kirimBackupHarian(client, alasan = 'cron') {
     try {
         const backup = require('./services/backup');
 
-        logger.system('⏰ Cron: membuat cadangan data harian...');
+        logger.system(`⏰ Cadangan data harian dibuat (trigger: ${alasan})...`);
         const hasil = await backup.buatBackup({ alasan: 'cadangan harian' });
         const ukuran = backup._ukuranTerbaca(hasil.ukuran);
         const r = hasil.ringkasan;
@@ -297,7 +321,8 @@ async function kirimBackupHarian(client) {
 
         const tujuan = _nomorAdmin();
         if (!tujuan.length) {
-            logger.warn('BACKUP', 'Cadangan harian dibuat, tapi tidak ada admin login untuk dikirimi.');
+            logger.warn('BACKUP', 'Cadangan harian dibuat, tapi tidak ada tujuan WhatsApp (admin belum login & WA_ADMIN kosong).');
+            _catatBackupTerkirim(`dibuat, tanpa tujuan kirim`);
             return;
         }
 
@@ -306,6 +331,7 @@ async function kirimBackupHarian(client) {
                 await client.sendMessage(wa,
                     `${keterangan}\n\n⚠️ Berkas terlalu besar untuk WhatsApp.\nAmbil manual: \`${hasil.berkas}\``);
             }
+            _catatBackupTerkirim('berkas terlalu besar, hanya keterangan');
             return;
         }
 
@@ -325,9 +351,25 @@ async function kirimBackupHarian(client) {
                 }
             }
         }
+
+        // Dicatat setelah percobaan kirim, bukan sebelumnya: kalau proses mati
+        // di tengah pengiriman, catch-up masih akan mengulangnya hari itu juga.
+        _catatBackupTerkirim(`terkirim ke ${tujuan.length} tujuan`);
     } catch (e) {
         logger.error('BACKUP', `Cadangan harian gagal: ${e.message}`);
     }
+}
+
+/** Tandai bahwa cadangan hari ini sudah diproses, agar catch-up tidak mengulang. */
+function _catatBackupTerkirim(catatan) {
+    _tulisState({
+        ..._bacaState(),
+        backup: {
+            tanggal: _tanggalLokal(),
+            catatan,
+            waktu: new Date().toISOString(),
+        },
+    });
 }
 
 /**
@@ -396,11 +438,39 @@ function initScheduler(client) {
     // ── Cadangan harian & kirim ke admin ──
     if (config.backupEnabled) {
         cron.schedule(config.backupSchedule, () => {
-            kirimBackupHarian(client);
+            kirimBackupHarian(client, 'cron');
         }, {
             scheduled: true,
             timezone: timezone,
         });
+
+        // Catch-up cadangan: node-cron tidak mengejar jadwal yang lewat saat
+        // bot sedang mati/restart. Tanpa ini, satu restart tepat di jam 22:00
+        // membuat cadangan hari itu hilang tanpa jejak.
+        const menitBackup = _menitJadwal(config.backupSchedule);
+        if (menitBackup === null) {
+            logger.warn('SCHEDULER', `Catch-up cadangan tidak aktif: pola "${config.backupSchedule}" bukan format "M H * * *".`);
+        } else {
+            const cekBackupTerlewat = async () => {
+                try {
+                    const state = _bacaState();
+                    if (state.backup && state.backup.tanggal === _tanggalLokal()) return;
+
+                    const selisihMenit = _menitLokal() - menitBackup;
+                    if (selisihMenit < 0) return;
+                    if (selisihMenit * 60 * 1000 > CATCHUP_WINDOW_MS) return;
+
+                    logger.warn('SCHEDULER', `Cadangan harian belum dibuat (${selisihMenit} menit lewat). Menjalankan catch-up...`);
+                    await kirimBackupHarian(client, 'catchup');
+                } catch (e) {
+                    logger.error('SCHEDULER', `Pemeriksaan cadangan terlewat gagal: ${e.message}`);
+                }
+            };
+
+            setTimeout(cekBackupTerlewat, 90 * 1000);
+            const timerBackup = setInterval(cekBackupTerlewat, CATCHUP_INTERVAL_MS);
+            if (timerBackup.unref) timerBackup.unref();
+        }
     }
 
     logger.success('SCHEDULER', `Cron aktif: "${schedule}" (${timezone}), catch-up tiap ${CATCHUP_INTERVAL_MS / 60000} menit & pembersihan harian (00:00).`);

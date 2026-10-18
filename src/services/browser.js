@@ -203,6 +203,82 @@ async function tutupDialogGangguan(page) {
     }
 }
 
+// Properti khas ekspor ekstensi browser yang tidak dikenal CDP.
+const FIELD_EKSTENSI = [
+    'expirationDate', 'session', 'hostOnly', 'storeId', 'id',
+    'sourceOrigin', 'sameParty', 'sourceScheme', 'sourcePort',
+];
+
+const PETA_SAME_SITE = {
+    'no_restriction': 'None',
+    'none': 'None',
+    'lax': 'Lax',
+    'strict': 'Strict',
+};
+
+// Hanya cookie domain Google yang relevan untuk Google Form. Membatasi di sini
+// menjaga berkas cookie tetap ramping saat disimpan ulang.
+const DOMAIN_RELEVAN = /(^|\.)(google\.com|googleusercontent\.com|gstatic\.com)$/i;
+
+/**
+ * Ubah satu cookie hasil ekspor ekstensi menjadi bentuk yang dimengerti CDP.
+ *
+ * Ekstensi (EditThisCookie, Cookie-Editor, dsb) menulis masa berlaku pada field
+ * `expirationDate`, sedangkan Puppeteer/CDP hanya membaca `expires`. Tanpa
+ * konversi ini SETIAP cookie masuk sebagai *session cookie*: hilang begitu
+ * Chrome ditutup dan tidak pernah ikut tersimpan ke profil — akar masalah
+ * "cookie minta diperbarui lagi besoknya".
+ *
+ * @param {Object} c
+ * @returns {Object}
+ */
+function _sanitasiCookie(c) {
+    const cookie = { ...c };
+
+    if (cookie.sameSite) {
+        const normalized = PETA_SAME_SITE[String(cookie.sameSite).toLowerCase()];
+        if (normalized) {
+            cookie.sameSite = normalized;
+        } else {
+            delete cookie.sameSite;
+        }
+    }
+
+    if (cookie.expires === undefined && typeof cookie.expirationDate === 'number') {
+        cookie.expires = Math.floor(cookie.expirationDate);
+    }
+
+    // Cookie yang memang bertipe sesi tidak boleh diberi masa berlaku palsu.
+    if (cookie.session === true) delete cookie.expires;
+
+    for (const field of FIELD_EKSTENSI) delete cookie[field];
+
+    return cookie;
+}
+
+/**
+ * Kembalikan cookie ke format ekspor ekstensi, supaya berkas hasil simpan
+ * otomatis tetap bisa ditukar/diedit manual seperti berkas aslinya.
+ * @param {Object} c - cookie dari browser.cookies()
+ * @returns {Object}
+ */
+function _keFormatEkstensi(c) {
+    const persisten = typeof c.expires === 'number' && c.expires > 0;
+    return {
+        domain: c.domain,
+        ...(persisten ? { expirationDate: c.expires } : {}),
+        hostOnly: !String(c.domain || '').startsWith('.'),
+        httpOnly: !!c.httpOnly,
+        name: c.name,
+        path: c.path || '/',
+        sameSite: c.sameSite || 'no_restriction',
+        secure: !!c.secure,
+        session: !persisten,
+        storeId: '0',
+        value: c.value,
+    };
+}
+
 /**
  * Baca, validasi, dan injeksi cookie ke halaman
  * @param {import('puppeteer').Page} page
@@ -218,44 +294,72 @@ async function injectCookies(page, cookiePath) {
         throw new Error('Format cookie tidak valid (bukan array JSON).');
     }
 
-    // Sanitasi cookie agar kompatibel dengan Puppeteer
     const safeCookies = rawCookies
-        .filter(c => c !== null && typeof c === 'object')
-        .map(c => {
-            const cookie = { ...c };
-
-            // Normalisasi sameSite
-            const sameSiteMap = {
-                'no_restriction': 'None',
-                'none': 'None',
-                'lax': 'Lax',
-                'strict': 'Strict',
-            };
-
-            if (cookie.sameSite) {
-                const normalized = sameSiteMap[cookie.sameSite.toLowerCase()];
-                if (normalized) {
-                    cookie.sameSite = normalized;
-                } else {
-                    delete cookie.sameSite;
-                }
-            }
-
-            // Hapus properti non-standard
-            delete cookie.sourceOrigin;
-            delete cookie.sameParty;
-            delete cookie.sourceScheme;
-            delete cookie.sourcePort;
-
-            return cookie;
-        });
+        .filter(c => c !== null && typeof c === 'object' && c.name && c.domain)
+        .map(_sanitasiCookie);
 
     if (safeCookies.length === 0) {
         throw new Error('Cookie kosong setelah sanitasi.');
     }
 
-    await page.setCookie(...safeCookies);
-    logger.debug('BROWSER', `${safeCookies.length} cookie berhasil disuntikkan.`);
+    // Lewat browser context, bukan page.setCookie(): page.setCookie() menghapus
+    // cookie bernama sama lebih dulu, sehingga token hasil rotasi Google yang
+    // sudah tersimpan di profil ikut terbuang sebelum sempat dipakai.
+    await page.browserContext().setCookie(...safeCookies);
+
+    const persisten = safeCookies.filter(c => typeof c.expires === 'number' && c.expires > 0).length;
+    logger.debug('BROWSER', `${safeCookies.length} cookie disuntikkan (${persisten} persisten, ${safeCookies.length - persisten} sesi).`);
+}
+
+/**
+ * Simpan ulang cookie terbaru dari browser ke berkas.
+ *
+ * Google merotasi token `__Secure-1PSIDTS`/`__Secure-3PSIDTS`/`SIDCC` secara
+ * berkala. Nilai hasil rotasi hanya hidup di dalam profil Chrome; bila tidak
+ * ditulis kembali ke berkas, injeksi hari berikutnya memakai token lama yang
+ * sudah dicabut Google → redirect ke halaman login → bot melapor "Cookie
+ * kedaluwarsa" walau cookie baru saja diperbarui.
+ *
+ * Penulisan bersifat atomik (tulis sementara lalu rename) agar berkas cookie
+ * tidak pernah korup bila proses mati di tengah penyimpanan.
+ *
+ * @param {import('puppeteer').Browser} browser
+ * @param {string} cookiePath
+ * @param {string} label - nama driver, untuk log
+ * @returns {Promise<boolean>} true bila berkas diperbarui
+ */
+async function simpanCookie(browser, cookiePath, label = 'BROWSER') {
+    try {
+        const segar = (await browser.cookies())
+            .filter(c => c && c.name && DOMAIN_RELEVAN.test(String(c.domain).replace(/^\./, '')));
+
+        // Tanpa cookie login inti, sesi di browser sudah logout. Menyimpannya
+        // justru akan menimpa berkas yang masih baik dengan cookie kosong.
+        if (!segar.some(c => c.name === 'SID' || c.name === '__Secure-1PSID')) {
+            logger.debug(label, 'Cookie tidak disimpan: sesi Google di browser tidak lengkap.');
+            return false;
+        }
+
+        // Gabung dengan isi berkas lama supaya cookie yang tidak ikut terpasang
+        // di profil (mis. ditolak Chrome) tidak hilang dari berkas.
+        const kunci = (c) => `${c.name}|${c.domain}|${c.path || '/'}`;
+        const gabungan = new Map();
+        for (const c of bacaJSON(cookiePath) || []) {
+            if (c && c.name && c.domain) gabungan.set(kunci(c), c);
+        }
+        for (const c of segar) gabungan.set(kunci(c), _keFormatEkstensi(c));
+
+        const tmpPath = `${cookiePath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify([...gabungan.values()], null, 2), 'utf8');
+        fs.renameSync(tmpPath, cookiePath);
+
+        logger.debug(label, `Cookie diperbarui otomatis (${gabungan.size} entri tersimpan).`);
+        return true;
+    } catch (e) {
+        // Kegagalan menyimpan tidak boleh menggagalkan absen yang sudah sukses.
+        logger.warn(label, `Gagal menyimpan cookie terbaru: ${e.message}`);
+        return false;
+    }
 }
 
 /**
@@ -370,6 +474,7 @@ module.exports = {
     createPage,
     bukaHalaman,
     injectCookies,
+    simpanCookie,
     tutupDialogGangguan,
     klikTombolTeks,
     klikAriaLabel,
