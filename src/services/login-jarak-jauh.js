@@ -350,14 +350,13 @@ function _tulisCookie(cookiePath, cookies) {
 }
 
 /**
- * Uji berkas cookie persis seperti absen harian: profil kosong + injeksi.
+ * Uji persis seperti absen harian: profil sesi driver + injeksi berkas cookie.
  * Token hasil rotasi saat uji langsung disimpan kembali.
  */
 async function _ujiCookie(driver, cookiePath) {
-    const profil = path.join(config.sessionDir, `${PREFIX_PROFIL}uji-${driver.id}-${Date.now()}`);
     let browser = null;
     try {
-        browser = await launchBrowser(profil, 1);
+        browser = await launchBrowser(db.getSessionPath(driver), 1);
         const page = await createPage(browser);
         await injectCookies(page, cookiePath);
         await bukaHalaman(page, settings.getFormUrl(), config.formTimeout);
@@ -366,7 +365,58 @@ async function _ujiCookie(driver, cookiePath) {
         return lolos;
     } finally {
         await tutupBrowser(browser);
-        _hapusFolder(profil);
+    }
+}
+
+/**
+ * Jadikan profil Chrome hasil login sebagai profil absen driver.
+ *
+ * Cookie login Google kini terikat ke profil tempat login dilakukan: cookie
+ * yang sama, bila disuntikkan ke profil lain, ditolak (terbukti di VPS).
+ * Jadi profil login dipindahkan utuh (rename, bukan salin — dua profil aktif
+ * dengan token sama bisa membuat Google mencabut sesinya).
+ */
+async function _pasangProfil(sesi) {
+    const { sedangAbsen } = require('./form-filler');
+    for (let i = 0; i < 150 && sedangAbsen(); i++) {
+        if (i === 0) _setStatus(sesi, 'menyimpan', 'Menunggu absen yang sedang berjalan selesai...');
+        await delay(2000);
+    }
+    if (sedangAbsen()) throw new Error('Absen lain masih berjalan terlalu lama. Coba lagi nanti.');
+
+    const tujuan = db.getSessionPath(sesi.driver);
+    const cadangan = `${tujuan}.sebelum-login`;
+    _hapusFolder(cadangan);
+    if (fs.existsSync(tujuan)) fs.renameSync(tujuan, cadangan);
+    fs.renameSync(sesi.profil, tujuan);
+    sesi.profil = null; // jangan ikut dihapus saat sesi dibereskan
+    return cadangan;
+}
+
+/** Path database cookie Chrome (lokasi berbeda antar versi). */
+function _berkasCookieProfil(profil) {
+    for (const rel of ['Default/Network/Cookies', 'Default/Cookies']) {
+        const p = path.join(profil, rel);
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
+
+/**
+ * Deteksi login tanpa menyentuh Chrome: nama cookie di SQLite tersimpan
+ * sebagai teks biasa (nilainya terenkripsi). Chrome menulis ke disk dengan
+ * jeda hingga ±30 detik setelah login.
+ */
+function _cookieLoginTertulis(profil) {
+    const berkas = profil && _berkasCookieProfil(profil);
+    if (!berkas) return false;
+    try {
+        let isi = fs.readFileSync(berkas).toString('latin1');
+        const jurnal = `${berkas}-journal`;
+        if (fs.existsSync(jurnal)) isi += fs.readFileSync(jurnal).toString('latin1');
+        return isi.includes('__Secure-1PSID') && /[^A-Za-z_-]SID[^A-Za-z_-]/.test(isi);
+    } catch (e) {
+        return false;
     }
 }
 
@@ -393,32 +443,29 @@ async function _selesaikanLogin(sesi, manual = false) {
 
         const panen = await _panenCookie(sesi);
         if (!panen) {
-            // Belum login: buka lagi Chrome-nya supaya driver bisa melanjutkan.
+            // Cookie login ada di disk tetapi form tetap minta login —
+            // biasanya Google masih menahan di halaman verifikasi.
             sesi.sedangMenyimpan = false;
             const urlLogin = 'https://accounts.google.com/ServiceLogin?hl=id&continue=' + encodeURIComponent(settings.getFormUrl());
             await _nyalakanChrome(sesi, urlLogin);
             if (sesi.penonton.size) _mulaiPerekam(sesi);
-            _setStatus(sesi, 'login', manual
-                ? 'Login belum terdeteksi. Selesaikan login sampai formulir terbuka.'
-                : 'Lanjutkan login dengan akun Google driver.');
+            _setStatus(sesi, 'login', 'Login belum tuntas. Lanjutkan sampai formulir terbuka.');
             return;
         }
 
         sesi.email = panen.email;
         sesi.jumlahCookie = panen.cookies.length;
-        const cadangan = _tulisCookie(cookiePath, panen.cookies);
+        const cadanganCookie = _tulisCookie(cookiePath, panen.cookies);
 
-        // Profil absen lama berisi token yang sudah dicabut Google; dibuang
-        // agar tidak bertabrakan dengan cookie baru (kecuali sedang dipakai).
-        const { sedangAbsen } = require('./form-filler');
-        if (!sedangAbsen()) _hapusFolder(db.getSessionPath(driver));
+        _setStatus(sesi, 'menyimpan', 'Login berhasil! Memasang sesi & menguji di mesin absen...');
+        const cadanganProfil = await _pasangProfil(sesi);
 
-        _setStatus(sesi, 'menyimpan', 'Login berhasil! Menguji cookie di mesin absen...');
         if (!await _ujiCookie(driver, cookiePath)) {
-            if (cadangan) fs.copyFileSync(cadangan, cookiePath);
-            throw new Error('Cookie tersimpan tetapi ditolak saat diuji di mesin absen. Cookie lama dikembalikan.');
+            if (cadanganCookie) fs.copyFileSync(cadanganCookie, cookiePath);
+            throw new Error('Login berhasil tetapi formulir menolak sesi saat diuji. Cookie lama dikembalikan.');
         }
-        if (cadangan) _hapusFolder(cadangan);
+        if (cadanganCookie) _hapusFolder(cadanganCookie);
+        _hapusFolder(cadanganProfil);
 
         _setStatus(sesi, 'sukses', 'Selesai! Cookie tersimpan & lolos uji. Halaman ini boleh ditutup.');
         await _akhiri(sesi, 'sukses');
@@ -437,17 +484,27 @@ async function _pantau(sesi) {
         return _akhiri(sesi, 'kedaluwarsa');
     }
 
-    // Judul jendela = judul halaman. Setelah login sukses Google mengarahkan
-    // ke formulir, yang judulnya bukan judul halaman akun Google.
     const judul = await _judulJendela(sesi);
     if (judul && judul !== sesi.judulTerakhir) {
         sesi.judulTerakhir = judul;
         logger.debug('LOGIN-GOOGLE', `[${sesi.driver.nama}] halaman: ${judul}`);
     }
-    // Judul yang pernah gagal diperiksa tidak memicu ulang (cegah loop restart).
-    if (sesi.status === 'login' && judul && !POLA_JUDUL_LOGIN.test(judul.trim())
-        && judul !== sesi.judulGagal) {
-        sesi.judulGagal = judul;
+    if (sesi.status !== 'login') return;
+
+    // Penanda login = cookie SID tertulis di profil. Judul halaman tidak bisa
+    // dipakai: Google menyisipkan halaman "Selamat datang", verifikasi, info
+    // pemulihan, dsb. yang judulnya tak terduga.
+    if (!sesi.loginTerdeteksiPada && _cookieLoginTertulis(sesi.profil)) {
+        sesi.loginTerdeteksiPada = Date.now();
+        _setStatus(sesi, 'login', 'Login terdeteksi! Lewati/selesaikan halaman tambahan Google bila ada...');
+    }
+    if (!sesi.loginTerdeteksiPada) return;
+
+    // Setelah login, tunggu sampai Google mengarahkan ke formulir (judul
+    // jendela bukan halaman akun), atau paling lama 45 detik. Halaman
+    // tambahan seperti "Pastikan Anda selalu dapat login" tidak wajib diisi.
+    const diFormulir = judul && !POLA_JUDUL_LOGIN.test(judul.trim());
+    if (diFormulir || Date.now() - sesi.loginTerdeteksiPada > 45000) {
         return _selesaikanLogin(sesi);
     }
 }
@@ -462,7 +519,7 @@ async function _bereskanProses(sesi) {
     sesi.chrome = null;
     _bunuh(sesi.xvfb);
     await delay(300);
-    _hapusFolder(sesi.profil);
+    if (sesi.profil) _hapusFolder(sesi.profil);
 }
 
 async function _akhiri(sesi, hasil, alasan = '') {
