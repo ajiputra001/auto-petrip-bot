@@ -90,11 +90,36 @@ function _hapusFolder(p) {
     } catch (e) { /* folder belum ada */ }
 })();
 
+/**
+ * Cari binary di PATH + folder standar tanpa memanggil `which` — PATH proses
+ * bot (npm/pm2) bisa berbeda dari shell, dan `which` belum tentu ada.
+ * @returns {string|null} path absolut
+ */
+function _cariBinary(nama) {
+    const folder = new Set([
+        ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean),
+        '/usr/local/bin', '/usr/bin', '/bin', '/usr/local/sbin', '/usr/sbin', '/snap/bin',
+    ]);
+    for (const dir of folder) {
+        const kandidat = path.join(dir, nama);
+        try {
+            fs.accessSync(kandidat, fs.constants.X_OK);
+            return kandidat;
+        } catch (e) { /* lanjut */ }
+    }
+    return null;
+}
+
+/** Path absolut alat sistem; diisi oleh _cekPrasyarat(). */
+const BIN = { Xvfb: 'Xvfb', xdotool: 'xdotool', ffmpeg: 'ffmpeg' };
+
 /** Pastikan alat sistem yang dibutuhkan tersedia, dengan pesan yang jelas. */
 async function _cekPrasyarat() {
     const kurang = [];
     for (const [bin, paket] of [['Xvfb', 'xvfb'], ['xdotool', 'xdotool'], ['ffmpeg', 'ffmpeg']]) {
-        try { await _exec('which', [bin]); } catch (e) { kurang.push(paket); }
+        const lokasi = _cariBinary(bin);
+        if (lokasi) BIN[bin] = lokasi;
+        else kurang.push(paket);
     }
     if (kurang.length) {
         throw new Error(`Paket sistem belum terpasang: ${kurang.join(', ')}. Jalankan: sudo apt-get install -y ${kurang.join(' ')}`);
@@ -105,7 +130,7 @@ async function _cekPrasyarat() {
 /** Jalankan Xvfb; nomor display bebas dipilih Xvfb sendiri (-displayfd). */
 function _nyalakanXvfb() {
     return new Promise((resolve, reject) => {
-        const proc = spawn('Xvfb', ['-displayfd', '3', '-screen', '0', `${LEBAR}x${TINGGI}x24`, '-nolisten', 'tcp'], {
+        const proc = spawn(BIN.Xvfb, ['-displayfd', '3', '-screen', '0', `${LEBAR}x${TINGGI}x24`, '-nolisten', 'tcp'], {
             stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
         });
         const batas = setTimeout(() => { _bunuh(proc); reject(new Error('Xvfb tidak merespons.')); }, 10000);
@@ -160,7 +185,7 @@ function _setStatus(sesi, status, pesan) {
 function _mulaiPerekam(sesi) {
     if (sesi.ffmpeg || sesi.selesai) return;
 
-    const proc = spawn('ffmpeg', [
+    const proc = spawn(BIN.ffmpeg, [
         '-loglevel', 'error',
         '-f', 'x11grab', '-draw_mouse', '0', '-framerate', String(FPS),
         '-video_size', `${LEBAR}x${TINGGI}`, '-i', `${sesi.display}+0,0`,
@@ -230,10 +255,10 @@ async function _nyalakanChrome(sesi, url) {
     for (let i = 0; i < 40; i++) {
         await delay(500);
         try {
-            const id = (await _exec('xdotool', ['search', '--onlyvisible', '--class', 'chrome'], sesi.env)).split('\n')[0];
+            const id = (await _exec(BIN.xdotool, ['search', '--onlyvisible', '--class', 'chrome'], sesi.env)).split('\n')[0];
             if (id) {
                 sesi.idJendela = id;
-                await _exec('xdotool', ['windowfocus', '--sync', id], sesi.env).catch(() => {});
+                await _exec(BIN.xdotool, ['windowfocus', '--sync', id], sesi.env).catch(() => {});
                 return;
             }
         } catch (e) { /* jendela belum ada */ }
@@ -243,7 +268,7 @@ async function _nyalakanChrome(sesi, url) {
 
 async function _judulJendela(sesi) {
     if (!sesi.idJendela) return '';
-    return _exec('xdotool', ['getwindowname', sesi.idJendela], sesi.env).catch(() => '');
+    return _exec(BIN.xdotool, ['getwindowname', sesi.idJendela], sesi.env).catch(() => '');
 }
 
 // ── Penyimpanan cookie ─────────────────────────────────────────────────────
@@ -481,7 +506,14 @@ async function mulaiSesi(driver, opsi = {}) {
         const { proc, display } = await _nyalakanXvfb();
         sesi.xvfb = proc;
         sesi.display = display;
-        sesi.env = { ...process.env, DISPLAY: display };
+        // PATH dilengkapi folder standar: skrip pembungkus google-chrome
+        // memanggil utilitas lain yang harus bisa ditemukan.
+        const pathStandar = '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin';
+        sesi.env = {
+            ...process.env,
+            DISPLAY: display,
+            PATH: [process.env.PATH, pathStandar].filter(Boolean).join(path.delimiter),
+        };
 
         const urlLogin = 'https://accounts.google.com/ServiceLogin?hl=id&continue=' + encodeURIComponent(settings.getFormUrl());
         await _nyalakanChrome(sesi, urlLogin);
@@ -572,7 +604,7 @@ async function tanganiInput(token, body) {
     if (sesi.sedangMenyimpan) return { success: false, error: 'Sedang memeriksa login, tunggu sebentar.' };
     if (!sesi.chrome) return { success: false, error: 'Browser belum siap.' };
 
-    const xdo = (...args) => _exec('xdotool', args, sesi.env);
+    const xdo = (...args) => _exec(BIN.xdotool, args, sesi.env);
     const pas = (n) => Math.min(1, Math.max(0, Number(n) || 0));
 
     switch (body && body.type) {
