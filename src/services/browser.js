@@ -475,6 +475,8 @@ module.exports = {
     bukaHalaman,
     injectCookies,
     simpanCookie,
+    keFormatEkstensi: _keFormatEkstensi,
+    DOMAIN_RELEVAN,
     tutupDialogGangguan,
     klikTombolTeks,
     klikAriaLabel,

@@ -174,6 +174,14 @@ apt-get install -y -qq \
     >/dev/null 2>&1 || ingat "Sebagian pustaka Chromium gagal dipasang."
 sukses "Pustaka Chromium headless terpasang."
 
+# Layar virtual untuk /logindriver: Google menolak login dari Chrome headless,
+# jadi sesi login memakai Chrome berlayar di atas Xvfb.
+info "Memasang layar virtual Xvfb (untuk /logindriver)..."
+apt-get install -y -qq xvfb xauth xdotool ffmpeg fonts-noto-color-emoji >/dev/null 2>&1 \
+    || ingat "Xvfb/xdotool/ffmpeg gagal dipasang — /logindriver tidak akan berfungsi."
+command -v Xvfb >/dev/null 2>&1 && command -v xdotool >/dev/null 2>&1 \
+    && command -v ffmpeg >/dev/null 2>&1 && sukses "Xvfb, xdotool & ffmpeg siap."
+
 # ══════════════════════════════════════════════════════════════════════════════
 tahap "Menyiapkan swap ${SWAP_SIZE_GB} GB"
 # ══════════════════════════════════════════════════════════════════════════════

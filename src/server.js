@@ -344,6 +344,35 @@ async function router(req, res) {
         return sendJSON(res, 200, result);
     }
 
+    // ── Login Google jarak jauh (/logindriver) ──
+    // Token panjang & acak di URL berfungsi sebagai kunci akses; tanpa token
+    // yang cocok dengan sesi aktif semua permintaan ditolak.
+    const cocokLogin = pathname.match(/^\/(?:api\/)?login-google\/([A-Za-z0-9_-]{20,64})(\/stream|\/input)?$/);
+    if (cocokLogin) {
+        const [, token, sub] = cocokLogin;
+        const loginJauh = require('./services/login-jarak-jauh');
+
+        if (!sub && method === 'GET') {
+            const halaman = path.join(config.webDir, 'login-google.html');
+            res.writeHead(200, {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store',
+                'Referrer-Policy': 'no-referrer',
+                'X-Robots-Tag': 'noindex',
+            });
+            return fs.createReadStream(halaman).pipe(res);
+        }
+        if (sub === '/stream' && method === 'GET') {
+            return loginJauh.tanganiStream(token, req, res);
+        }
+        if (sub === '/input' && method === 'POST') {
+            let body = {};
+            try { ({ body } = await readBody(req)); } catch (e) { /* body rusak */ }
+            const hasil = await loginJauh.tanganiInput(token, body).catch(e => ({ success: false, error: e.message }));
+            return sendJSON(res, hasil.success ? 200 : 400, hasil);
+        }
+    }
+
     // ── Halaman statis ──
     if (method === 'GET') {
         return serveStatic(req, res);

@@ -967,7 +967,8 @@ async function _kirimAlertCookieExpired(waClient, driver) {
             `Absen otomatis driver ini ${tebal('berhenti')} sampai cookie diperbarui.`,
         ],
         kaki: [
-            `💡 Perbarui dengan ${kode(`/updatecookie ${depan}`)} + lampirkan JSON.`,
+            `⚡ Tercepat (tanpa PC): ${kode(`/logindriver ${depan} kedriver`)}`,
+            `💡 Atau ${kode(`/updatecookie ${depan}`)} + lampirkan JSON.`,
         ],
     });
 
@@ -980,9 +981,9 @@ async function _kirimAlertCookieExpired(waClient, driver) {
             ``,
             `📌 *Cara memperbaiki:*`,
             cabang([
-                `1️⃣ Ambil file JSON cookie baru dari browser Anda`,
-                `2️⃣ Kirim berkas itu ke bot ini`,
-                `3️⃣ Beri caption: ${kode(`/updatecookie ${depan}`)}`,
+                `Ketik ${kode(`/logindriver ${depan}`)} ke bot ini`,
+                `Buka link yang dikirim, lalu login Google dari HP`,
+                `Selesai — tidak perlu PC atau file JSON`,
             ]),
         ],
         kaki: [`⏳ ${miring('Absen otomatis Anda tertunda sampai cookie diperbarui.')}`],

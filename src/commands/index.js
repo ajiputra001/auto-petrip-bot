@@ -25,6 +25,7 @@ const {
 const { showAdminMenu, handleAdminInput, clearAdminState } = require('./admin-ui');
 const { handleBackup, handleRestore, handleListBackup } = require('./backup');
 const { handleAdjustSemua, handleHapusAkun } = require('./admin-massal');
+const { handleLoginDriver, handleBatalLogin, handleStatusLogin } = require('./login-google');
 
 /**
  * Daftar semua perintah resmi untuk kecerdasan rekomendasi typo
@@ -33,7 +34,7 @@ const KNOWN_COMMANDS = [
     '/menu', '/bantuan',
     '/tambahdriver', '/editdriver', '/hapusdriver', '/listdriver',
     '/setlibur', '/setmasuk', '/ceklibur',
-    '/updatefoto', '/updatecookie',
+    '/updatefoto', '/updatecookie', '/logindriver', '/batallogin', '/statuslogin',
     '/status', '/absen', '/absenmanual',
     '/daftar', '/login', '/logout', '/saldo', '/topup', '/riwayat', '/linkakun', '/linkdriver',
     '/admin', '/listuser', '/aktifkan', '/nonaktifkan', '/setadmin', '/adminreset', '/adjust', '/orderlist', '/adminstat',
@@ -66,6 +67,11 @@ const ROUTES = [
     // Media
     { match: (cmd) => cmd.startsWith('/updatefoto') || cmd.startsWith('/update foto'),     handler: handleUpdateFoto },
     { match: (cmd) => cmd.startsWith('/updatecookie') || cmd.startsWith('/update cookie'), handler: handleUpdateCookie },
+
+    // Login Google jarak jauh
+    { match: (cmd) => cmd.startsWith('/logindriver ') || cmd === '/logindriver', handler: handleLoginDriver },
+    { match: (cmd) => cmd === '/batallogin',  handler: handleBatalLogin },
+    { match: (cmd) => cmd === '/statuslogin', handler: handleStatusLogin },
 
     // System
     { match: (cmd) => cmd === '/status',      handler: handleStatus },

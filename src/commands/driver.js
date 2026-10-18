@@ -75,7 +75,8 @@ async function handleTambahDriver(msg, pesan) {
             ],
             kaki: [
                 `📌 ${tebal('Dua langkah lagi sebelum bisa absen:')}`,
-                `1️⃣ Kirim file JSON cookie, caption ${kode(`/updatecookie ${depan}`)}`,
+                `1️⃣ Sambungkan Google tanpa PC: ${kode(`/logindriver ${depan}`)}`,
+                `    ${miring(`atau kirim JSON cookie dengan caption /updatecookie ${depan}`)}`,
                 `2️⃣ Kirim gambar screenshot, caption ${kode(`/updatefoto ${depan}`)}`,
                 ``,
                 `💡 Cek kesiapannya dengan ${kode('/listdriver')}.`,
@@ -344,7 +345,7 @@ async function handleListDriver(msg) {
 
     if (belumSiap.length) {
         kaki.push(`⚠️ Belum siap absen: ${tebal(belumSiap.join(', '))}`);
-        kaki.push(`💡 Lengkapi dengan ${kode('/updatecookie [Nama]')} & ${kode('/updatefoto [Nama]')}.`);
+        kaki.push(`💡 Lengkapi dengan ${kode('/logindriver [Nama]')} & ${kode('/updatefoto [Nama]')}.`);
     } else {
         kaki.push(`✅ ${miring('Semua berkas lengkap — siap absen otomatis.')}`);
     }

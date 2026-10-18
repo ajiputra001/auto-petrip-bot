@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex">
+<title>Login Google Driver — Auto-Petrip</title>
+<link rel="icon" href="/assets/favicon.png">
+<style>
+    :root {
+        --bg: #070b18; --card: #111a36; --accent: #22bcd4; --accent2: #7c5cff;
+        --text: #e9eeff; --muted: #8a94b8; --ok: #2dd4a7; --err: #ff5c7a; --warn: #ffb547;
+        --border: rgba(120, 150, 220, 0.18);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: var(--bg); color: var(--text);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    .wrap { max-width: 460px; margin: 0 auto; padding: 12px 12px 28px; }
+
+    header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    header img { width: 34px; height: 34px; border-radius: 9px; }
+    header h1 { font-size: 1.02rem; margin: 0; font-weight: 700; }
+    header small { color: var(--muted); display: block; font-size: .78rem; }
+
+    .status { display: flex; gap: 10px; align-items: center; padding: 10px 12px;
+        border: 1px solid var(--border); border-radius: 14px; background: var(--card); margin-bottom: 10px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex: none;
+        box-shadow: 0 0 0 4px rgba(255,181,71,.15); animation: denyut 1.4s infinite; }
+    .status.ok .dot { background: var(--ok); box-shadow: 0 0 0 4px rgba(45,212,167,.15); animation: none; }
+    .status.err .dot { background: var(--err); box-shadow: 0 0 0 4px rgba(255,92,122,.15); animation: none; }
+    @keyframes denyut { 50% { opacity: .35; } }
+    .status p { margin: 0; font-size: .88rem; line-height: 1.35; flex: 1; }
+    .timer { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8rem; }
+
+    .layar { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--border);
+        background: #fff; aspect-ratio: 412 / 860; touch-action: none; }
+    .layar img { width: 100%; height: 100%; display: block; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+    .muat { position: absolute; inset: 0; display: grid; place-items: center; background: var(--card);
+        color: var(--muted); font-size: .9rem; text-align: center; padding: 20px; }
+    .muat.hilang { display: none; }
+    .riak { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+        border: 2px solid var(--accent); pointer-events: none; animation: riak .45s ease-out forwards; }
+    @keyframes riak { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+
+    .ketik { display: flex; gap: 8px; margin-top: 10px; }
+    .ketik input { flex: 1; min-width: 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border);
+        background: var(--card); color: var(--text); font-size: 16px; outline: none; }
+    .ketik input:focus { border-color: var(--accent); }
+    button { border: 0; border-radius: 12px; padding: 12px 14px; font-weight: 600; font-size: .9rem;
+        color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); cursor: pointer; }
+    button.abu { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+    button:active { transform: scale(.97); }
+    .alat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+    .alat button { padding: 10px 6px; font-size: .8rem; }
+
+    .lihat { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--muted); font-size: .78rem; }
+    .info { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px dashed var(--border);
+        color: var(--muted); font-size: .8rem; line-height: 1.5; }
+    .info b { color: var(--text); }
+
+    .selesai { position: fixed; inset: 0; display: none; place-items: center; background: rgba(7,11,24,.94);
+        padding: 24px; text-align: center; z-index: 9; }
+    .selesai.tampil { display: grid; }
+    .selesai .ikon { font-size: 3.4rem; }
+    .selesai h2 { margin: 8px 0 6px; }
+    .selesai p { color: var(--muted); margin: 0 auto; max-width: 320px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header>
+        <img src="/assets/logo.png" alt="" onerror="this.style.display='none'">
+        <div>
+            <h1>Login Google Driver</h1>
+            <small id="namaDriver">Menghubungkan...</small>
+        </div>
+    </header>
+
+    <div class="status" id="kotakStatus">
+        <span class="dot"></span>
+        <p id="teksStatus">Menghubungkan ke browser bot...</p>
+        <span class="timer" id="timer"></span>
+    </div>
+
+    <div class="layar" id="layar">
+        <img id="frame" alt="Layar login Google">
+        <div class="muat" id="muat">⏳ Menyiapkan layar Google...</div>
+    </div>
+
+    <form class="ketik" id="formKetik" autocomplete="off">
+        <input id="masukan" type="password" placeholder="Ketuk kolom di layar, lalu ketik di sini"
+               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button type="submit">Kirim ↵</button>
+    </form>
+    <label class="lihat"><input type="checkbox" id="tampilkan"> Tampilkan teks yang diketik</label>
+
+    <div class="alat">
+        <button class="abu" data-key="Backspace">⌫ Hapus</button>
+        <button class="abu" data-key="Tab">⇥ Tab</button>
+        <button class="abu" data-nav="back">← Kembali</button>
+        <button class="abu" data-nav="reload">⟳ Muat</button>
+        <button class="abu" data-scroll="-400">▲ Gulir</button>
+        <button class="abu" data-scroll="400">▼ Gulir</button>
+        <button class="abu" data-key="Enter">↵ Enter</button>
+        <button class="abu" data-key="Escape">✕ Esc</button>
+    </div>
+    <button id="sudahLogin" style="width:100%;margin-top:10px">✅ Saya sudah login — simpan sekarang</button>
+
+    <div class="info">
+        🔒 <b>Aman:</b> Anda login langsung di halaman resmi Google. Password <b>tidak</b> dikirim lewat WhatsApp
+        dan tidak disimpan bot — yang disimpan hanya cookie sesi untuk absen otomatis.<br><br>
+        📱 <b>Cara pakai:</b> ketuk kolom email di layar → ketik di kotak bawah → <b>Kirim</b>.
+        Jika Google meminta verifikasi, buka notifikasi di HP pemilik akun.
+    </div>
+</div>
+
+<div class="selesai" id="layarSelesai">
+    <div>
+        <div class="ikon" id="ikonSelesai">✅</div>
+        <h2 id="judulSelesai">Login berhasil</h2>
+        <p id="teksSelesai"></p>
+    </div>
+</div>
+
+<script>
+(() => {
+    const token = location.pathname.split('/').filter(Boolean).pop();
+    const api = (sub) => `/api/login-google/${token}/${sub}`;
+    const $ = (id) => document.getElementById(id);
+
+    const img = $('frame'), layar = $('layar'), masukan = $('masukan');
+    let sisa = 0, selesai = false;
+
+    async function kirim(data) {
+        if (selesai) return;
+        try {
+            const r = await fetch(api('input'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!j.success && j.error) tampilStatus(j.error, 'err', true);
+        } catch (e) { tampilStatus('Koneksi terputus, mencoba lagi...', 'err', true); }
+    }
+
+    function tampilStatus(teks, kelas = '', sementara = false) {
+        const kotak = $('kotakStatus');
+        const lama = { t: $('teksStatus').textContent, c: kotak.className };
+        $('teksStatus').textContent = teks;
+        kotak.className = 'status ' + kelas;
+        if (sementara) setTimeout(() => { $('teksStatus').textContent = lama.t; kotak.className = lama.c; }, 2500);
+    }
+
+    function akhir(ikon, judul, teks) {
+        selesai = true;
+        $('ikonSelesai').textContent = ikon;
+        $('judulSelesai').textContent = judul;
+        $('teksSelesai').textContent = teks;
+        $('layarSelesai').classList.add('tampil');
+    }
+
+    // ── Stream layar & status ──
+    const es = new EventSource(api('stream'));
+    es.addEventListener('frame', (e) => {
+        img.src = 'data:image/jpeg;base64,' + e.data;
+        $('muat').classList.add('hilang');
+    });
+    es.addEventListener('status', (e) => {
+        const s = JSON.parse(e.data);
+        $('namaDriver').textContent = 'Driver: ' + s.driver;
+        sisa = s.sisaDetik;
+        const kelas = s.status === 'sukses' ? 'ok' : (['gagal', 'kedaluwarsa', 'dibatalkan'].includes(s.status) ? 'err' : '');
+        tampilStatus(s.pesan, kelas);
+
+        if (s.status === 'sukses') akhir('✅', 'Login berhasil', (s.email ? s.email + ' tersambung. ' : '') + 'Cookie sudah tersimpan dan diuji. Halaman ini boleh ditutup.');
+        if (s.status === 'gagal') akhir('⚠️', 'Login belum berhasil', s.pesan + ' Minta link baru ke admin.');
+        if (s.status === 'kedaluwarsa') akhir('⌛', 'Waktu habis', 'Link sudah tidak berlaku. Minta link baru ke admin.');
+        if (s.status === 'dibatalkan') akhir('🛑', 'Sesi dibatalkan', s.pesan);
+        if (selesai) es.close();
+    });
+    es.onerror = () => {
+        if (selesai) return;
+        if (!img.src) {
+            es.close();
+            akhir('🔗', 'Link tidak berlaku', 'Link ini sudah kedaluwarsa atau sudah dipakai. Minta link baru ke admin.');
+        } else {
+            tampilStatus('Koneksi tersendat, menyambung ulang...', 'err');
+        }
+    };
+
+    setInterval(() => {
+        if (selesai || sisa <= 0) return $('timer').textContent = '';
+        sisa--;
+        $('timer').textContent = `${Math.floor(sisa / 60)}:${String(sisa % 60).padStart(2, '0')}`;
+    }, 1000);
+
+    // ── Ketuk layar → klik di Chrome bot ──
+    layar.addEventListener('pointerup', (e) => {
+        if (!img.naturalWidth) return;
+        const kotak = img.getBoundingClientRect();
+        // object-fit: contain → hitung area gambar sebenarnya di dalam kotak
+        const skala = Math.min(kotak.width / img.naturalWidth, kotak.height / img.naturalHeight);
+        const w = img.naturalWidth * skala, h = img.naturalHeight * skala;
+        const ox = (kotak.width - w) / 2, oy = (kotak.height - h) / 2;
+        const fx = (e.clientX - kotak.left - ox) / w, fy = (e.clientY - kotak.top - oy) / h;
+        if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
+
+        const r = document.createElement('span');
+        r.className = 'riak';
+        r.style.left = (e.clientX - layar.getBoundingClientRect().left) + 'px';
+        r.style.top = (e.clientY - layar.getBoundingClientRect().top) + 'px';
+        layar.appendChild(r);
+        setTimeout(() => r.remove(), 500);
+
+        kirim({ type: 'click', fx, fy });
+    });
+
+    // Gulir dengan geser jari / roda mouse
+    let awalY = null;
+    layar.addEventListener('touchstart', (e) => { awalY = e.touches[0].clientY; }, { passive: true });
+    layar.addEventListener('touchend', (e) => {
+        if (awalY === null) return;
+        const dy = awalY - e.changedTouches[0].clientY;
+        if (Math.abs(dy) > 30) kirim({ type: 'scroll', dy: dy * 2 });
+        awalY = null;
+    });
+    layar.addEventListener('wheel', (e) => { e.preventDefault(); kirim({ type: 'scroll', dy: e.deltaY }); }, { passive: false });
+
+    // ── Ketik ──
+    $('formKetik').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const teks = masukan.value;
+        masukan.value = '';
+        if (teks) await kirim({ type: 'text', text: teks });
+        await kirim({ type: 'key', key: 'Enter' });
+    });
+    $('tampilkan').addEventListener('change', (e) => { masukan.type = e.target.checked ? 'text' : 'password'; });
+
+    $('sudahLogin').addEventListener('click', () => kirim({ type: 'selesai' }));
+    document.querySelectorAll('[data-key]').forEach((b) => b.addEventListener('click', () => kirim({ type: 'key', key: b.dataset.key })));
+    document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => kirim({ type: 'nav', aksi: b.dataset.nav })));
+    document.querySelectorAll('[data-scroll]').forEach((b) => b.addEventListener('click', () => kirim({ type: 'scroll', dy: Number(b.dataset.scroll) })));
+})();
+</script>
+</body>
+</html>

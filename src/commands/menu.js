@@ -310,6 +310,14 @@ async function handleBantuan(msg) {
     menu += `│ 🍪 \`/updatecookie [Nama]\` _(+ lampirkan JSON)_\n`;
     menu += `└─────────────────────────\n\n`;
 
+    menu += `┌─🔐 *LOGIN GOOGLE (TANPA PC)*\n`;
+    menu += `│ 🔑 \`/logindriver [Nama]\` — _link login ke chat Anda_\n`;
+    menu += `│ 📲 \`/logindriver [Nama] kedriver\` — _link ke WA driver_\n`;
+    menu += `│ 📡 \`/statuslogin\` — _pantau sesi_\n`;
+    menu += `│ 🛑 \`/batallogin\` — _hentikan sesi_\n`;
+    menu += `└─────────────────────────\n`;
+    menu += `_Driver login sendiri dari HP, cookie tersimpan & diuji otomatis._\n\n`;
+
     menu += `┌─📅 *JADWAL LIBUR*\n`;
     menu += `│ 🏖️ \`/setlibur [Nama] [Hari]\`\n`;
     menu += `│ 🚛 \`/setmasuk [Nama]\` — _batalkan libur_\n`;

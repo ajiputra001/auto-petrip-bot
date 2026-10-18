@@ -92,6 +92,9 @@ const config = {
     topupMaxDaily: parseInt(process.env.TOPUP_MAX_DAILY) || 10,         // max topup berhasil per hari per user
     topupCooldownMin: parseInt(process.env.TOPUP_COOLDOWN_MIN) || 5,    // jeda minimal antar pembuatan QRIS (menit)
 
+    // ── Login Google Jarak Jauh (/logindriver) ──
+    loginRemoteTimeoutMin: parseInt(process.env.LOGIN_REMOTE_TIMEOUT_MIN) || 10,
+
     // ── Puppeteer Args ──
     puppeteerArgs: [
         '--no-sandbox',
