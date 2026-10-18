@@ -646,7 +646,8 @@ async function tanganiInput(token, body) {
         case 'key': {
             const keysym = PETA_TOMBOL[body.key];
             if (!keysym) return { success: false, error: 'Tombol tidak dikenal.' };
-            await xdo('key', keysym);
+            const ulang = Math.min(100, Math.max(1, parseInt(body.ulang, 10) || 1));
+            await xdo('key', '--repeat', String(ulang), '--delay', '20', keysym);
             break;
         }
         case 'scroll': {
