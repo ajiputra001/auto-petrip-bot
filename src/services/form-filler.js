@@ -133,6 +133,34 @@ async function _halamanKonfirmasiTerbuka(page) {
     return page.evaluate(POLA_KONFIRMASI_SUMBER).catch(() => false);
 }
 
+/**
+ * Pastikan isian halaman aktif masih utuh tepat sebelum pindah halaman.
+ * Pertanyaan di form ini tidak wajib, jadi Google tidak akan menolak
+ * kiriman yang bolong — pemeriksaan harus dilakukan bot sendiri.
+ * @param {import('puppeteer').Page} page
+ * @param {string[]} nilaiTeks - isi yang diharapkan pada input teks, berurutan
+ * @param {string[]} labelRadio - aria-label opsi yang harus tercentang
+ * @param {string} namaHalaman
+ */
+async function _auditHalaman(page, nilaiTeks, labelRadio, namaHalaman) {
+    const hasil = await page.evaluate((labels) => ({
+        teks: [...document.querySelectorAll('input[type="text"]')].map(i => i.value.trim()),
+        radio: labels.map(l => [...document.querySelectorAll('div[role="radio"]')]
+            .some(r => (r.getAttribute('aria-label') || '').toLowerCase() === l.toLowerCase()
+                && r.getAttribute('aria-checked') === 'true')),
+    }), labelRadio);
+
+    const kurang = [];
+    nilaiTeks.forEach((v, i) => {
+        if (hasil.teks[i] !== String(v).trim()) kurang.push(`isian #${i + 1} ("${hasil.teks[i] || ''}")`);
+    });
+    labelRadio.forEach((l, i) => { if (!hasil.radio[i]) kurang.push(`opsi "${l}"`); });
+
+    if (kurang.length) {
+        throw new Error(`Isian ${namaHalaman} tidak lengkap sebelum lanjut: ${kurang.join(', ')}.`);
+    }
+}
+
 async function _cariErrorWajib(page) {
     try {
         return await page.evaluate(() => {
@@ -659,6 +687,10 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
                     await tutupDialogGangguan(page);
                     await page.evaluate(el => el.click(), chkEmail);
                 }
+                await delay(500);
+                if (await page.evaluate(el => el.getAttribute('aria-checked'), chkEmail) !== 'true') {
+                    throw new Error('Checkbox email gagal dicentang.');
+                }
             }
         }
         await klikTombolTeks(page, 'Berikutnya', 'Next');
@@ -687,6 +719,7 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
             throw new Error(`Form berubah: opsi status "${labelKerja}" tidak ditemukan.`);
         }
 
+        await _auditHalaman(page, [driver.nama, driver.id], [labelKerja], 'halaman identitas');
         await klikTombolTeks(page, 'Berikutnya', 'Next');
 
         // ── Jika LIBUR: langsung submit ──
@@ -753,13 +786,15 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
 
         await ketikAman(page, textInputsP3[0], driver.usia);
 
-        // Radio: Tidak (kelelahan)
-        await klikAriaLabel(page, ['Tidak']);
+        // Kedua radio ini tidak wajib di form, jadi Google tetap menerima
+        // kiriman walau kosong. Hasil klik harus diperiksa sendiri.
+        if (!await klikAriaLabel(page, ['Tidak'])) {
+            throw new Error('Opsi kelelahan "Tidak" gagal dipilih.');
+        }
+        if (!await klikAriaLabel(page, ['Lebih dari 6 Jam', 'Lebih dari 6 jam'])) {
+            throw new Error('Opsi istirahat "Lebih dari 6 jam" gagal dipilih.');
+        }
 
-        // Radio: Istirahat > 6 jam
-        await klikAriaLabel(page, ['Lebih dari 6 Jam', 'Lebih dari 6 jam']);
-
-        // Input reaksi
         await ketikAman(page, textInputsP3[1], driver.reaksi);
 
         // ── Upload Screenshot ──
@@ -767,7 +802,17 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         const uploadPath = tempScreenshotPath || ssPath;
         await _uploadBerkas(page, uploadPath, driver);
 
-        // Next ke halaman terakhir
+        // Upload memakan waktu ±30 dtk; draf bisa ter-reset di sela itu.
+        await _auditHalaman(
+            page,
+            [driver.usia, driver.reaksi],
+            ['Tidak'],
+            'halaman K3 Fatigue'
+        );
+        if (!(await _bacaBagianUpload(page)).includes(path.basename(uploadPath))) {
+            throw new Error('Lampiran SS reaksi hilang sebelum lanjut ke halaman akhir.');
+        }
+
         await klikTombolTeks(page, 'Berikutnya', 'Next');
         await delay(4000);
 

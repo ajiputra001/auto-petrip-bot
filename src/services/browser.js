@@ -420,17 +420,25 @@ async function klikAriaLabel(page, labels) {
     for (const label of labels) {
         const el = await page.$(`div[aria-label="${label}"]`);
         if (!el) continue;
-        try {
-            await page.evaluate(e => e.scrollIntoView({ block: 'center' }), el);
-            await delay(300);
+        // Klik bisa tertelan overlay/dialog draf tanpa error. Bukti sah
+        // hanya aria-checked="true"; ulangi sampai tercentang.
+        for (let i = 0; i < 4; i++) {
             try {
-                await el.click();
+                if (await page.evaluate(e => e.getAttribute('aria-checked') === 'true', el)) return true;
+                await page.evaluate(e => e.scrollIntoView({ block: 'center' }), el);
+                await delay(300);
+                try {
+                    await el.click();
+                } catch (e) {
+                    await tutupDialogGangguan(page);
+                    await page.evaluate(e2 => e2.click(), el);
+                }
+                await delay(500);
             } catch (e) {
-                await tutupDialogGangguan(page);
-                await page.evaluate(e2 => e2.click(), el);
+                break; // elemen stale → coba label berikutnya
             }
-            return true;
-        } catch (e) { /* coba label berikutnya */ }
+        }
+        if (await page.evaluate(e => e.getAttribute('aria-checked') === 'true', el).catch(() => false)) return true;
     }
     return false;
 }
