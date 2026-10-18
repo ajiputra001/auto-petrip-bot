@@ -295,7 +295,9 @@ async function handleBantuan(msg) {
     menu += `┌─🚀 *ABSEN*\n`;
     menu += `│ 🤖 \`/absenmanual\` — _semua driver sekarang_\n`;
     menu += `│ 🚚 \`/absen [Nama]\` — _satu driver_\n`;
-    menu += `└─────────────────────────\n\n`;
+    menu += `│ ♻️ \`/absen [Nama] paksa\` — _ulangi yang sudah absen_\n`;
+    menu += `└─────────────────────────\n`;
+    menu += `_Driver yang sudah absen hari ini otomatis dilewati._\n\n`;
 
     menu += `┌─👥 *DATA DRIVER*\n`;
     menu += `│ ➕ \`/tambahdriver [Nama]#[ID]#[Usia]#[Reaksi]\`\n`;

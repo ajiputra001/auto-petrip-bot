@@ -22,6 +22,7 @@ const {
     ketikAman,
 } = require('./browser');
 const { generasiRingkasanAI } = require('./ai-summary');
+const riwayatAbsen = require('./riwayat-absen');
 const ProgressTracker = require('./progress');
 const { buatSesiPanel, JUDUL_PANEL } = ProgressTracker;
 const wallet = require('../wallet');
@@ -276,6 +277,68 @@ function _bacaBagianUpload(page) {
             return sec ? sec.innerText.replace(/\s+/g, ' ').trim() : '';
         })
         .catch(() => '');
+}
+
+/**
+ * Kosongkan seluruh draf jawaban lewat tombol "Kosongkan formulir".
+ *
+ * Google Form menyimpan draf jawaban per akun. Lampiran yang sudah diunggah
+ * ikut tersimpan di draf itu dan TIDAK hilang saat halaman dimuat ulang.
+ *
+ * Akibatnya pada hari libur: halaman K3 (tempat pertanyaan "Upload Foto")
+ * memang dilewati, tetapi lampiran dari absen kerja sebelumnya masih menempel
+ * di draf dan ikut terkirim — persis seperti yang terlihat pada email tanda
+ * terima. Karena itu draf dibersihkan lebih dulu, sebelum pengisian dimulai.
+ *
+ * Dialog konfirmasinya memuat dua tombol dengan label sama ("Kosongkan
+ * formulir"); yang ditekan adalah tombol di dalam dialog, bukan pemicunya.
+ *
+ * @param {import('puppeteer').Page} page
+ * @returns {Promise<boolean>} true bila draf benar-benar dikosongkan
+ */
+async function _kosongkanDraf(page) {
+    try {
+        const adaPemicu = await page.evaluate(() => {
+            const btn = [...document.querySelectorAll('div[role="button"], button')].find((b) =>
+                /^(kosongkan formulir|clear form)$/i.test((b.innerText || '').trim())
+            );
+            if (!btn) return false;
+            btn.click();
+            return true;
+        });
+
+        if (!adaPemicu) return false;
+
+        // Tunggu dialog konfirmasi benar-benar terpasang sebelum menekan tombolnya.
+        await page.waitForFunction(
+            () => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')]
+                .some(d => /kosongkan formulir\?|clear form\?/i.test(d.innerText || '')),
+            { timeout: 10000 }
+        );
+
+        const dikonfirmasi = await page.evaluate(() => {
+            const dialog = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')]
+                .find(d => /kosongkan formulir\?|clear form\?/i.test(d.innerText || ''));
+            if (!dialog) return false;
+            const btn = [...dialog.querySelectorAll('div[role="button"], button, a')].find((b) =>
+                /^(kosongkan formulir|clear form)$/i.test((b.innerText || '').trim())
+            );
+            if (!btn) return false;
+            btn.click();
+            return true;
+        });
+
+        if (!dikonfirmasi) return false;
+
+        // Google memuat ulang form setelah draf dikosongkan.
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        await delay(2500);
+        return true;
+    } catch (e) {
+        // Draf yang gagal dikosongkan bukan alasan membatalkan absen —
+        // pengisian tetap dilanjutkan, hanya dicatat di log.
+        return false;
+    }
 }
 
 /**
@@ -574,6 +637,15 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
         // dalam hitungan hari.
         await simpanCookie(browser, cookiePath, driver.nama);
 
+        // Bersihkan draf jawaban milik akun ini sebelum mulai mengisi.
+        // Lampiran yang tersimpan di draf akan ikut terkirim walau halaman
+        // uploadnya dilewati — inilah sebab foto masih menempel pada laporan
+        // hari libur. Mengosongkan draf memastikan form benar-benar bersih.
+        await progress.update(2, 'Membersihkan draf jawaban lama...');
+        if (await _kosongkanDraf(page)) {
+            logger.info(driver.nama, 'Draf jawaban lama dikosongkan sebelum pengisian.');
+        }
+
         // ── Page 1: Checkbox Email ──
         await progress.update(2, '[STAGE 1/4] Sinkronisasi Checkbox Email...');
         await tutupDialogGangguan(page);
@@ -640,6 +712,13 @@ async function isiGoogleForm(waClient, driver, liveMsgObj = null, senderWa = nul
                         ? `Form menahan pengisian libur: ${pesanWajib}`
                         : 'Halaman kirim untuk mode libur tidak terbuka. Ada data wajib di halaman sebelumnya yang belum terisi.'
                 );
+            }
+
+            // Jaring pengaman terakhir: pastikan tidak ada lampiran yang ikut
+            // terkirim pada hari libur. Kalau draf masih menyisakan berkas,
+            // buang dulu daripada mengirim foto yang tidak semestinya ada.
+            if (await _hapusBerkasDraf(page)) {
+                logger.warn(driver.nama, 'Lampiran sisa draf ditemukan pada mode libur — dibuang sebelum kirim.');
             }
 
             await _kirimDanVerifikasi(page, driver, 'libur');
@@ -974,6 +1053,46 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
         }
     }
 
+    // Jaring pengaman lintas-pemicu: absen manual dan cron saling tidak tahu
+    // satu sama lain. Tanpa catatan bersama ini, catch-up mengisi ulang
+    // formulir driver yang baru saja diabsen manual — saldo terpotong dua kali
+    // dan Google menerima dua tanggapan untuk orang yang sama.
+    // Admin tetap bisa memaksa lewat `paksa: true` (/absen ... paksa).
+    const dilewati = [];
+    if (!options.paksa) {
+        const sisa = [];
+        for (const d of drivers) {
+            if (riwayatAbsen.sudahSuksesHariIni(d.nama)) {
+                dilewati.push(d.nama);
+            } else {
+                sisa.push(d);
+            }
+        }
+        drivers = sisa;
+
+        if (dilewati.length > 0) {
+            logger.warn('ABSEN', `Dilewati (sudah absen hari ini): ${dilewati.join(', ')}.`);
+        }
+
+        if (drivers.length === 0) {
+            const daftar = dilewati.map(n => `• ${n}`).join('\n');
+            if (originalMsg) {
+                await originalMsg.reply(kartu({
+                    judul: `✅ *SUDAH ABSEN HARI INI*`,
+                    isi: [
+                        `Formulir untuk driver berikut sudah terkirim hari ini:`,
+                        ``,
+                        daftar,
+                        ``,
+                        `Absen diulang hanya akan memotong saldo dan mengirim tanggapan ganda ke Google.`,
+                    ],
+                    kaki: [`💡 Benar-benar perlu mengulang? Gunakan ${kode('/absen [Nama] paksa')}.`],
+                }));
+            }
+            return { total: 0, suksesCount: 0, gagalCount: 0, rekapLaporan: [], dilewati };
+        }
+    }
+
     const targetChatId = originalMsg ? originalMsg.safeChatId || originalMsg.from : config.waGrup;
     let liveMsgObj = null;
 
@@ -1045,6 +1164,9 @@ async function _prosesAbsenMassal(waClient, targetNama = null, originalMsg = nul
 
         if (hasil.status === 'SUKSES') {
             suksesCount++;
+            // Dicatat di berkas bersama supaya pemicu lain (cron/catch-up/manual)
+            // tahu driver ini sudah absen dan tidak mengisinya untuk kedua kali.
+            riwayatAbsen.catatSukses(driver.nama);
             // Dicatat per driver agar progres tidak hilang bila proses mati
             // (OOM) di tengah siklus — lihat catatSukses() di scheduler.
             if (typeof options.onSukses === 'function') {

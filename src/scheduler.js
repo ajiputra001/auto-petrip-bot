@@ -6,7 +6,9 @@ const path = require('path');
 const cron = require('node-cron');
 const config = require('./config');
 const logger = require('./utils/logger');
+const db = require('./database');
 const { prosesAbsenMassal, sedangAbsen } = require('./services/form-filler');
+const riwayatAbsen = require('./services/riwayat-absen');
 const { bersihkanLogLama, bersihkanZombieChrome } = require('./utils/self-healing');
 const { bacaJSON, tulisJSON, ensureDir, withTimeout } = require('./utils/helpers');
 const { kartu, kode, tebal, miring, cabang } = require('./utils/tampilan');
@@ -112,7 +114,15 @@ async function jalankanAbsenOtomatis(client, alasan = 'cron') {
 
     // Nama yang SUDAH sukses — jangan diisi ulang. Penting saat proses mati
     // (OOM) di tengah siklus lalu catch-up melanjutkan setelah restart.
-    const sudahSukses = new Set(Array.isArray(state.suksesNama) ? state.suksesNama : []);
+    //
+    // Digabung dengan riwayat absen harian supaya driver yang sudah diabsen
+    // MANUAL juga terlewati. State scheduler hanya mencatat siklus otomatis,
+    // sehingga tanpa penggabungan ini catch-up akan mengisi ulang formulir
+    // driver yang baru saja diabsen lewat perintah /absen.
+    const sudahSukses = new Set([
+        ...(Array.isArray(state.suksesNama) ? state.suksesNama : []),
+        ...riwayatAbsen.suksesHariIni(),
+    ]);
 
     if (sudahSukses.size > 0) {
         logger.warn('SCHEDULER', `Melanjutkan siklus yang terputus. Sudah sukses: ${[...sudahSukses].join(', ')}.`);
@@ -414,7 +424,19 @@ function initScheduler(client) {
                 if (selisihMenit < 0) return;
                 if (selisihMenit * 60 * 1000 > CATCHUP_WINDOW_MS) return;
 
-                logger.warn('SCHEDULER', `Jadwal absen belum tuntas (${selisihMenit} menit lewat). Menjalankan catch-up...`);
+                // Semua driver sudah absen (mis. lewat perintah manual) →
+                // tidak ada yang perlu dikejar. Tanpa pemeriksaan ini, bot yang
+                // baru dinyalakan langsung mengisi ulang formulir yang sudah
+                // terkirim: saldo terpotong lagi & Google menerima dua
+                // tanggapan untuk driver yang sama.
+                const sudah = new Set(riwayatAbsen.suksesHariIni().map(n => n.toLowerCase()));
+                const belum = db.getAllDrivers().filter(d => !sudah.has(d.nama.toLowerCase()));
+                if (belum.length === 0) {
+                    logger.debug('SCHEDULER', 'Catch-up dilewati: semua driver sudah absen hari ini.');
+                    return;
+                }
+
+                logger.warn('SCHEDULER', `Jadwal absen belum tuntas (${selisihMenit} menit lewat, ${belum.length} driver belum absen). Menjalankan catch-up...`);
                 await jalankanAbsenOtomatis(client, 'catchup');
             } catch (e) {
                 logger.error('SCHEDULER', `Pemeriksaan jadwal terlewat gagal: ${e.message}`);
