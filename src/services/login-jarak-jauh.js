@@ -323,9 +323,8 @@ async function _panenCookie(sesi) {
             args: [...config.puppeteerArgs, '--password-store=basic'],
             timeout: 90000,
         });
-        const page = await createPage(browser);
+        const page = await browser.newPage();
         await bukaHalaman(page, settings.getFormUrl(), config.formTimeout);
-        if (POLA_HALAMAN_LOGIN.test(page.url())) return null;
 
         const cookies = (await browser.cookies())
             .filter(c => c && c.name && DOMAIN_RELEVAN.test(String(c.domain).replace(/^\./, '')));
@@ -358,7 +357,12 @@ async function _ujiCookie(driver, cookiePath) {
     try {
         browser = await launchBrowser(db.getSessionPath(driver), 1);
         const page = await createPage(browser);
-        await injectCookies(page, cookiePath);
+        // Profil hasil login SUDAH berisi cookie Google. Menyuntik ulang cookie
+        // yang sama (terutama SID yang baru dirotasi) ke profil ini bisa merusak
+        // sesinya. Cookie dari berkas hanya dijadikan cadangan bila profil kosong.
+        if (!_cookieLoginTertulis(db.getSessionPath(driver))) {
+            await injectCookies(page, cookiePath);
+        }
         await bukaHalaman(page, settings.getFormUrl(), config.formTimeout);
         const lolos = !POLA_HALAMAN_LOGIN.test(page.url());
         if (lolos) await simpanCookie(browser, cookiePath, driver.nama);
@@ -443,13 +447,18 @@ async function _selesaikanLogin(sesi, manual = false) {
 
         const panen = await _panenCookie(sesi);
         if (!panen) {
-            // Cookie login ada di disk tetapi form tetap minta login —
-            // biasanya Google masih menahan di halaman verifikasi.
+            // Dua kemungkinan: (1) cookie login belum ter-flush ke disk, atau
+            // (2) Google benar-benar belum memberi sesi sah. Keduanya tidak
+            // boleh dijawab dengan restart ke halaman login (itu menghapus
+            // progres verifikasi driver). Buka ulang Chrome di URL yang sama
+            // dan biarkan deteksi cookie di _pantau melanjutkan.
             sesi.sedangMenyimpan = false;
-            const urlLogin = 'https://accounts.google.com/ServiceLogin?hl=id&continue=' + encodeURIComponent(settings.getFormUrl());
-            await _nyalakanChrome(sesi, urlLogin);
+            const lanjut = _cookieLoginTertulis(sesi.profil)
+                ? settings.getFormUrl()
+                : 'https://accounts.google.com/ServiceLogin?hl=id&continue=' + encodeURIComponent(settings.getFormUrl());
+            await _nyalakanChrome(sesi, lanjut);
             if (sesi.penonton.size) _mulaiPerekam(sesi);
-            _setStatus(sesi, 'login', 'Login belum tuntas. Lanjutkan sampai formulir terbuka.');
+            _setStatus(sesi, 'login', 'Login belum tuntas. Lanjutkan sampai formulir terbuka, atau tekan "Sudah login".');
             return;
         }
 
@@ -505,6 +514,9 @@ async function _pantau(sesi) {
     // tambahan seperti "Pastikan Anda selalu dapat login" tidak wajib diisi.
     const diFormulir = judul && !POLA_JUDUL_LOGIN.test(judul.trim());
     if (diFormulir || Date.now() - sesi.loginTerdeteksiPada > 45000) {
+        // Cegah loop: bila _selesaikanLogin gagal panen dan Chrome di-restart,
+        // jangan langsung memicu lagi di detak berikutnya.
+        sesi.loginTerdeteksiPada = 0;
         return _selesaikanLogin(sesi);
     }
 }
